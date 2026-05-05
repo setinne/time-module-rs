@@ -1,6 +1,0 @@
-# API 配置
-# 格式: 键=值
-
-# 伊斯兰历
-ALADHAN_API_URL=https://api.aladhan.com/v1/gToH
-TIMEOUT_SECONDS=5
