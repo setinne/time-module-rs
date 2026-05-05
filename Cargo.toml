@@ -1,9 +1,12 @@
 [package]
 name = "time_module"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "LGPL-2.1-only"
 authors = ["Setinne"]
+rust-version = "1.64"
+description = "A high-precision NTP time & timezone library for Windows (Vista+)"
+documentation = "https://github.com/setinne/time-module-rs"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -17,5 +20,3 @@ panic = "abort"
 
 [profile.release.build-override]
 opt-level = 0
-
-# 不要添加任何依赖
