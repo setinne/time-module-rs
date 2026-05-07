@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Setinne
+// SPDX-License-Identifier: LGPL-2.1-only
+//
+// This file is part of the TIME_MODULE project.
+// Licensed under the GNU Lesser General Public License v2.1.
+// You may obtain a copy of the License at:
+//     https://www.gnu.org/licenses/lgpl-2.1.html
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::super::converter::utc_to_fulltime;
+    use super::super::days::{is_leap_year, day_of_year_to_month_day};
+
+    #[test]
+    fn test_utc_to_fulltime_positive() {
+        let ft = utc_to_fulltime(0, 0, 28800);
+        assert_eq!(ft.year, 1970);
+        assert_eq!(ft.month, 1);
+        assert_eq!(ft.day, 1);
+        assert_eq!(ft.hour, 8);
+    }
+
+    #[test]
+    fn test_utc_to_fulltime_negative() {
+        let ft = utc_to_fulltime(0, 0, -28800);
+        assert_eq!(ft.year, 1969);
+        assert_eq!(ft.month, 12);
+        assert_eq!(ft.day, 31);
+        assert_eq!(ft.hour, 16);
+    }
+
+    #[test]
+    fn test_2038_timestamp() {
+        let ft = utc_to_fulltime(2147483647, 0, 0);
+        assert_eq!(ft.year, 2038);
+        assert_eq!(ft.month, 1);
+        assert_eq!(ft.day, 19);
+        assert_eq!(ft.hour, 3);
+        assert_eq!(ft.minute, 14);
+        assert_eq!(ft.second, 7);
+    }
+
+    #[test]
+    fn test_leap_year() {
+        assert!(is_leap_year(2000));
+        assert!(!is_leap_year(1900));
+    }
+
+    #[test]
+    fn test_day_of_year() {
+        let (month, day) = day_of_year_to_month_day(2020, 60);
+        assert_eq!(month, 2);
+        assert_eq!(day, 29);
+    }
+}
