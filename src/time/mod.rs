@@ -7,10 +7,10 @@
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
 // 时间模块根，组织子模块
+
 pub mod config;
 pub mod defines;
-pub mod git;
-pub mod handle;
-pub mod tz_country;
-pub mod tz_name;
+pub mod core;
+pub mod calc;
+pub mod tz;
 pub mod dst;

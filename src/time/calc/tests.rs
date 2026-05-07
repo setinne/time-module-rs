@@ -7,10 +7,9 @@
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
 
-
 #[cfg(test)]
 mod tests {
-    use super::super::converter::utc_to_fulltime;
+    use super::super::convert::utc_to_fulltime;
     use super::super::days::{is_leap_year, day_of_year_to_month_day};
 
     #[test]

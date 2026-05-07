@@ -8,11 +8,14 @@
 
 
 //! UTC 时间戳转本地时间结构体
-mod converter;
+
+mod convert;
 mod days;
+mod sync;
 mod tests;
 
-pub use converter::utc_to_fulltime;
+pub use convert::utc_to_fulltime;
+pub use sync::{check_time_accuracy, get_calibrated_local_time, is_time_synced};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
