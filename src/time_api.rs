@@ -157,6 +157,12 @@ pub extern "C" fn api_SetAutoSyncEnabled(enabled: bool) {
 pub extern "C" fn api_SetLastError(code: i32) {
     LAST_ERROR.store(code, Ordering::Release);
 }
+/// 关闭 DLL，停止所有后台线程
+/// 在卸载 DLL 前调用，确保干净退出
+#[no_mangle]
+pub extern "C" fn api_Shutdown() {
+    crate::time::core::ntp::shutdown();
+}
 
 // ---------- Sync ----------
 #[no_mangle]

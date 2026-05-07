@@ -6,6 +6,7 @@
 // You may obtain a copy of the License at:
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
+
 // NTP 模块对外接口
 mod config;
 mod fetcher;
@@ -18,9 +19,15 @@ static CACHED_SEC: AtomicU64 = AtomicU64::new(0);
 static CACHED_US: AtomicU64 = AtomicU64::new(0);
 static AVAILABLE: AtomicBool = AtomicBool::new(false);
 static START_ONCE: Once = Once::new();
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);  // 新增：退出标志
 
 pub fn get_cached_utc_time() -> Option<(u64, i32)> {
-    START_ONCE.call_once(|| { std::thread::spawn(updater::ntp_updater); });
+    START_ONCE.call_once(|| { 
+        std::thread::spawn(|| {
+            updater::ntp_updater_with_shutdown();
+        });
+    });
+    
     if AVAILABLE.load(Ordering::Acquire) {
         let sec = CACHED_SEC.load(Ordering::Acquire);
         let us = CACHED_US.load(Ordering::Acquire) as i32;
@@ -28,7 +35,9 @@ pub fn get_cached_utc_time() -> Option<(u64, i32)> {
     } else { None }
 }
 
-pub fn is_ntp_available() -> bool { AVAILABLE.load(Ordering::Acquire) }
+pub fn is_ntp_available() -> bool { 
+    AVAILABLE.load(Ordering::Acquire) 
+}
 
 pub fn force_resync() -> bool {
     if let Some((sec, us, _)) = fetcher::fetch_best_ntp() {
@@ -43,4 +52,9 @@ pub(crate) fn update_cache(sec: u64, us: i32) {
     CACHED_SEC.store(sec, Ordering::Release);
     CACHED_US.store(us as u64, Ordering::Release);
     AVAILABLE.store(true, Ordering::Release);
+}
+
+/// 关闭 NTP 后台线程（DLL 卸载时调用）
+pub fn shutdown() {
+    SHUTDOWN.store(true, Ordering::Release);
 }

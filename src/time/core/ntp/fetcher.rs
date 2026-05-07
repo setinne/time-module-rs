@@ -6,43 +6,95 @@
 // You may obtain a copy of the License at:
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
-// 精确 NTP 协议实现：往返延迟校正
+
+//! 标准 NTP 协议实现（RFC 5905）
+
 use std::net::{UdpSocket, ToSocketAddrs};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const NTP_UNIX_OFFSET: u64 = 2208988800;
 const NTP_FRACTION_MAX: f64 = 4294967296.0;
 
-fn query_single(server: &str) -> Option<(u64, i32, f64)> {
+/// NTP 包结构（48 字节）
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct NtpPacket {
+    data: [u8; 48],
+}
+
+impl NtpPacket {
+    fn new_client() -> Self {
+        let mut packet = NtpPacket { data: [0u8; 48] };
+        packet.data[0] = 0x1B;
+        packet
+    }
+    
+    fn receive_timestamp_sec(&self) -> u64 {
+        u32::from_be_bytes([
+            self.data[32], self.data[33], self.data[34], self.data[35]
+        ]) as u64
+    }
+    
+    fn receive_timestamp_frac(&self) -> f64 {
+        let frac = u32::from_be_bytes([
+            self.data[36], self.data[37], self.data[38], self.data[39]
+        ]);
+        frac as f64 / NTP_FRACTION_MAX
+    }
+    
+    fn transmit_timestamp_sec(&self) -> u64 {
+        u32::from_be_bytes([
+            self.data[40], self.data[41], self.data[42], self.data[43]
+        ]) as u64
+    }
+    
+    fn transmit_timestamp_frac(&self) -> f64 {
+        let frac = u32::from_be_bytes([
+            self.data[44], self.data[45], self.data[46], self.data[47]
+        ]);
+        frac as f64 / NTP_FRACTION_MAX
+    }
+}
+
+struct NtpResponse {
+    offset_sec: f64,
+    delay_sec: f64,
+}
+
+fn query_single(server: &str) -> Option<NtpResponse> {
     let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
-    let _ = sock.set_read_timeout(Some(Duration::from_millis(3000)));
-    let _ = sock.set_write_timeout(Some(Duration::from_millis(3000)));
-    let mut packet = [0u8; 48];
-    packet[0] = 0x1B;
+    sock.set_read_timeout(Some(Duration::from_millis(3000))).ok()?;
+    sock.set_write_timeout(Some(Duration::from_millis(3000))).ok()?;
+    
     let addrs = server.to_socket_addrs().ok()?;
+    
     for addr in addrs {
+        let packet = NtpPacket::new_client();
+        
         let t1 = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
-        let t1_sec = t1.as_secs();
-        let t1_frac = t1.subsec_nanos() as f64 / 1_000_000_000.0;
-        if sock.send_to(&packet, addr).is_err() { continue; }
+        let t1_total = t1.as_secs() as f64 + t1.subsec_nanos() as f64 / 1_000_000_000.0;
+        
+        if sock.send_to(&packet.data, addr).is_err() {
+            continue;
+        }
+        
         let mut buf = [0u8; 48];
         match sock.recv_from(&mut buf) {
             Ok((size, _)) if size >= 48 => {
                 let t4 = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
-                let t4_sec = t4.as_secs();
-                let t4_frac = t4.subsec_nanos() as f64 / 1_000_000_000.0;
-                let ntp_sec = u32::from_be_bytes([buf[40], buf[41], buf[42], buf[43]]) as u64;
-                let ntp_frac = u32::from_be_bytes([buf[44], buf[45], buf[46], buf[47]]) as f64 / NTP_FRACTION_MAX;
-                let t2_sec = ntp_sec - NTP_UNIX_OFFSET;
-                let t2_frac = ntp_frac;
-                let theta = ((t2_sec as f64 + t2_frac) - (t1_sec as f64 + t1_frac)
-                            + (t4_sec as f64 + t4_frac) - (t2_sec as f64 + t2_frac)) / 2.0;
-                let offset_sec = theta as u64;
-                let offset_nsec = (theta.fract() * 1_000_000_000.0) as u32;
-                let corr_sec = t4_sec.saturating_add(offset_sec);
-                let corr_nsec = (t4_frac * 1_000_000_000.0) as u32 + offset_nsec;
-                let corr_us = (corr_nsec / 1000) as i32;
-                return Some((corr_sec, corr_us, theta.abs()));
+                let t4_total = t4.as_secs() as f64 + t4.subsec_nanos() as f64 / 1_000_000_000.0;
+                
+                let response = NtpPacket { data: buf };
+                
+                let t2_total = (response.receive_timestamp_sec() - NTP_UNIX_OFFSET) as f64 + response.receive_timestamp_frac();
+                let t3_total = (response.transmit_timestamp_sec() - NTP_UNIX_OFFSET) as f64 + response.transmit_timestamp_frac();
+                
+                let delay = (t4_total - t1_total) - (t3_total - t2_total);
+                let offset = ((t2_total - t1_total) + (t3_total - t4_total)) / 2.0;
+                
+                if delay >= 0.0 && delay < 1.0 {
+                    return Some(NtpResponse { offset_sec: offset, delay_sec: delay });
+                }
             }
             _ => continue,
         }
@@ -52,10 +104,25 @@ fn query_single(server: &str) -> Option<(u64, i32, f64)> {
 
 pub fn fetch_best_ntp() -> Option<(u64, i32, f64)> {
     let servers = super::config::load_ntp_servers();
-    for s in servers {
-        if let Some(res) = query_single(&s) {
-            return Some(res);
+    
+    let mut best_result: Option<(u64, i32, f64)> = None;
+    let mut best_delay = f64::MAX;
+    
+    for server in servers {
+        if let Some(response) = query_single(&server) {
+            if response.delay_sec < best_delay {
+                best_delay = response.delay_sec;
+                
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+                let now_total = now.as_secs() as f64 + now.subsec_nanos() as f64 / 1_000_000_000.0;
+                let corrected = now_total + response.offset_sec;
+                
+                let sec = corrected as u64;
+                let us = ((corrected.fract() * 1_000_000.0) as i32).clamp(0, 999_999);
+                
+                best_result = Some((sec, us, response.delay_sec));
+            }
         }
     }
-    None
+    best_result
 }
