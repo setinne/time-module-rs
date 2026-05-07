@@ -1,0 +1,28 @@
+# Rust 编译产物
+/target/
+**/*.rs.bk
+*.exe
+*.dll
+*.pdb
+
+# IDE 文件
+/.vscode/
+/.idea/
+*.swp
+*.swo
+
+# Windows 系统文件
+Thumbs.db
+desktop.ini
+
+# 构建输出
+*.o
+*.so
+*.dylib
+
+# Cargo.lock 对于库项目建议忽略
+Cargo.lock
+
+# 测试临时文件
+*.log
+*.tmp
