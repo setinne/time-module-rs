@@ -222,6 +222,30 @@ pub extern "C" fn api_GetDSTOffset(country: *const c_char) -> i32 {
 pub extern "C" fn api_SetAutoDST(enabled: bool) {
     crate::time::config::set_auto_dst_enabled(enabled);
 }
+
+// ---------- 查询函数 ----------
+/// 检查指定国家是否有 DST 规则
+#[no_mangle]
+pub extern "C" fn api_IsDSTAvailable(country: *const c_char) -> bool {
+    let country_str = unsafe {
+        if country.is_null() { "" }
+        else { std::ffi::CStr::from_ptr(country).to_str().unwrap_or("") }
+    };
+    crate::time::dst::get_rule(country_str).is_some()
+}
+
+/// 检查 NTP 网络时间是否可用
+#[no_mangle]
+pub extern "C" fn api_IsNetworkTimeAvailable() -> bool {
+    crate::time::core::ntp::is_ntp_available()
+}
+
+/// 检查时区偏移是否有效
+#[no_mangle]
+pub extern "C" fn api_IsValidTimezoneOffset(sec: i32) -> bool {
+    sec >= -50400 && sec <= 50400
+}
+
 // ---------- Error ----------
 #[no_mangle]
 pub extern "C" fn api_GetErrorString(code: i32) -> *const c_char {
