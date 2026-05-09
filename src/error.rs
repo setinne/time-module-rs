@@ -20,6 +20,7 @@ pub enum TimeErrorCode {
     FileNotFound = 6,
     ParseError = 7,
     CountryNotFound = 8,
+    DstNotAvailable = 9,  // DST 规则不可用（无规则或已禁用）
 }
 
 impl TimeErrorCode {
@@ -34,8 +35,8 @@ impl TimeErrorCode {
             TimeErrorCode::FileNotFound => "Resource file not found",
             TimeErrorCode::ParseError => "Parse error",
             TimeErrorCode::CountryNotFound => "Country code not found in timezone database",
+            TimeErrorCode::DstNotAvailable => "DST not available (no rule or disabled)",
         }
     }
 }
-
 pub use TimeErrorCode as TimeError;
