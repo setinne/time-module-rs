@@ -18,6 +18,25 @@ use crate::error::TimeErrorCode;
 use crate::time::{calc, config, tz, dst};
 use crate::time::calc::FullTime;
 
+// ---------- 版本信息 ----------
+pub const VERSION_MAJOR: i32 = 0;
+pub const VERSION_MINOR: i32 = 2;
+pub const VERSION_PATCH: i32 = 3;
+
+/// 获取 DLL 版本号
+/// 返回值格式: 0xMMmmpp (主版本.次版本.补丁)
+/// 例如 0x000203 表示 0.2.3
+#[no_mangle]
+pub extern "C" fn api_GetVersion() -> i32 {
+    (VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | VERSION_PATCH
+}
+
+/// 获取版本字符串
+#[no_mangle]
+pub extern "C" fn api_GetVersionString() -> *const c_char {
+    let s = format!("{}.{}.{}", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
+    CString::new(s).unwrap_or_default().into_raw()
+}
 static LAST_ERROR: AtomicI32 = AtomicI32::new(0);
 
 fn result_to_i32(result: Result<(), TimeErrorCode>) -> i32 {
@@ -165,6 +184,7 @@ pub extern "C" fn api_Shutdown() {
 }
 
 // ---------- Sync ----------
+#[deprecated(since = "0.2.3", note = "Use api_ForceResyncEx() instead")]
 #[no_mangle]
 pub extern "C" fn api_ForceResync() -> bool {
     crate::time::core::ntp::force_resync()
