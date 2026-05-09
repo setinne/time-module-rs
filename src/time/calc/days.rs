@@ -14,10 +14,6 @@ pub fn is_leap_year(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
-/// 获取指定年份的天数
-pub fn days_in_year(year: i32) -> i64 {
-    if is_leap_year(year) { 366 } else { 365 }
-}
 
 /// 将一年中的第几天转换为月份和日期
 pub fn day_of_year_to_month_day(year: i32, mut day_of_year: i32) -> (i32, i32) {

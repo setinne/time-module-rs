@@ -9,15 +9,33 @@
 
 //! 对外 C 接口
 
-
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicI32, Ordering};
 
+use crate::time::calc::{FullTime, FullTimeNs, CalendarType};
 use crate::error::TimeErrorCode;
 use crate::time::{calc, config, tz, dst};
-use crate::time::calc::FullTime;
 
+// ---------- 版本信息 ----------
+pub const VERSION_MAJOR: i32 = 0;
+pub const VERSION_MINOR: i32 = 2;
+pub const VERSION_PATCH: i32 = 3;
+
+/// 获取 DLL 版本号
+/// 返回值格式: 0xMMmmpp (主版本.次版本.补丁)
+/// 例如 0x000203 表示 0.2.3
+#[no_mangle]
+pub extern "C" fn api_GetVersion() -> i32 {
+    (VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | VERSION_PATCH
+}
+
+/// 获取版本字符串
+#[no_mangle]
+pub extern "C" fn api_GetVersionString() -> *const c_char {
+    let s = format!("{}.{}.{}", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
+    CString::new(s).unwrap_or_default().into_raw()
+}
 static LAST_ERROR: AtomicI32 = AtomicI32::new(0);
 
 fn result_to_i32(result: Result<(), TimeErrorCode>) -> i32 {
@@ -25,6 +43,23 @@ fn result_to_i32(result: Result<(), TimeErrorCode>) -> i32 {
         Ok(()) => TimeErrorCode::Success as i32,
         Err(e) => e as i32,
     }
+}
+
+/// 设置历法类型（公历/儒略历）
+/// @param type: 0=公历（默认），1=儒略历
+#[no_mangle]
+pub extern "C" fn api_SetCalendarType(cal_type: i32) {
+    match cal_type {
+        1 => crate::time::calc::set_calendar_type(CalendarType::Julian),
+        _ => crate::time::calc::set_calendar_type(CalendarType::Gregorian),
+    }
+}
+
+/// 获取当前历法类型
+/// @return 0=公历，1=儒略历
+#[no_mangle]
+pub extern "C" fn api_GetCalendarType() -> i32 {
+    crate::time::calc::get_calendar_type() as i32
 }
 
 
@@ -70,6 +105,23 @@ pub extern "C" fn api_GetTimezoneOffset() -> i32 {
 #[no_mangle]
 pub extern "C" fn api_GetLastError() -> i32 {
     LAST_ERROR.load(Ordering::Acquire)
+}
+#[no_mangle]
+pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
+    let (secs, ns) = crate::time::core::local::get_system_time_ns();
+    let base_offset = config::get_timezone_offset();
+    let total_secs = secs + base_offset as i64;
+    
+    let ft = crate::time::calc::utc_to_fulltime_ns(total_secs, ns);
+    FullTimeNs {
+        year: ft.year,
+        month: ft.month,
+        day: ft.day,
+        hour: ft.hour,
+        minute: ft.minute,
+        second: ft.second,
+        ns: ft.us * 1000 + ft.ms % 1000,
+    }
 }
 
 // 新增：设置 DST 后端
@@ -165,6 +217,7 @@ pub extern "C" fn api_Shutdown() {
 }
 
 // ---------- Sync ----------
+#[deprecated(since = "0.2.3", note = "Use api_ForceResyncEx() instead")]
 #[no_mangle]
 pub extern "C" fn api_ForceResync() -> bool {
     crate::time::core::ntp::force_resync()
@@ -202,6 +255,30 @@ pub extern "C" fn api_GetDSTOffset(country: *const c_char) -> i32 {
 pub extern "C" fn api_SetAutoDST(enabled: bool) {
     crate::time::config::set_auto_dst_enabled(enabled);
 }
+
+// ---------- 查询函数 ----------
+/// 检查指定国家是否有 DST 规则
+#[no_mangle]
+pub extern "C" fn api_IsDSTAvailable(country: *const c_char) -> bool {
+    let country_str = unsafe {
+        if country.is_null() { "" }
+        else { std::ffi::CStr::from_ptr(country).to_str().unwrap_or("") }
+    };
+    crate::time::dst::get_rule(country_str).is_some()
+}
+
+/// 检查 NTP 网络时间是否可用
+#[no_mangle]
+pub extern "C" fn api_IsNetworkTimeAvailable() -> bool {
+    crate::time::core::ntp::is_ntp_available()
+}
+
+/// 检查时区偏移是否有效
+#[no_mangle]
+pub extern "C" fn api_IsValidTimezoneOffset(sec: i32) -> bool {
+    sec >= -50400 && sec <= 50400
+}
+
 // ---------- Error ----------
 #[no_mangle]
 pub extern "C" fn api_GetErrorString(code: i32) -> *const c_char {

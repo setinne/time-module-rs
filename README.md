@@ -51,6 +51,8 @@ your_app_folder/
     ├── ntp_servers.txt
     ├── tz_offsets.txt
     └── dst_rules.txt
+    
+```
 
 > 注：如果 `resources/` 文件夹不存在，DLL 将使用内嵌的默认数据。
 
@@ -188,6 +190,7 @@ class TimeModule
 | `api_FreeString()` | `void` | 释放格式化字符串内存 |
 | `api_IsNTPSynced()` | `bool` | 检查 NTP 是否已同步 |
 
+
 ### 时区与 DST 函数
 
 | 函数名 | 返回值 | 说明 |
@@ -219,6 +222,14 @@ class TimeModule
 | `api_GetErrorString()` | `const char*` | 获取错误码对应的描述文字 |
 | `api_GetLastError()` | `int` | 获取最后发生的错误码 |
 | `api_SetLastError()` | `void` | 设置错误码 |
+
+### 查询函数
+
+| 函数名 | 返回值 | 说明 |
+|--------|--------|------|
+| `api_IsDSTAvailable()` | `bool` | 检查指定国家是否有 DST 规则 |
+| `api_IsNetworkTimeAvailable()` | `bool` | 检查 NTP 网络时间是否可用 |
+| `api_IsValidTimezoneOffset()` | `bool` | 检查时区偏移是否有效（-50400 ~ 50400） |
 
 ---
 
@@ -252,6 +263,7 @@ typedef struct {
 | 6 | `FileNotFound` | 找不到资源文件 |
 | 7 | `ParseError` | 解析错误 |
 | 8 | `CountryNotFound` | 国家代码不在时区数据库中 |
+| 9 | `DstNotAvailable` | DST 规则不可用（无规则或已禁用） |
 
 ---
 
@@ -310,6 +322,12 @@ CN,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
 ---
 
+## ⚠️ 注意事项
+
+- `api_GetNetworkTime()` 返回全 0 表示 NTP 时间不可用，请先调用 `api_IsNetworkTimeAvailable()` 检查
+
+---
+
 ## ❓ 常见问题
 
 **Q1: DLL 需要管理员权限吗？**  
@@ -337,12 +355,12 @@ A: 支持。内部使用 64 位时间戳，可正确处理到 5849 年。
 
 ## 📥 下载
 
-### 最新版本：v0.2.1
+### 最新版本：v0.2.5
 
 | 文件 | 架构 | 大小 |
 |------|------|------|
-| [time_module_upx_x64.dll](https://github.com/setinne/time-module-rs/releases/latest) | 64位 | 368 KB |
-| [time_module_upx_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 | 395 KB |
+| [time_module_upx_x64.dll](https://github.com/setinne/time-module-rs/releases/latest) | 64位 | 369 KB |
+| [time_module_upx_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 | 396 KB |
 
 > Windows Vista 32 位用户若 UPX 压缩版不可用，请使用原始版本。
 

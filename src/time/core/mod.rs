@@ -11,6 +11,8 @@ pub mod local;
 pub mod provider;
 pub mod ntp;
 
-pub use local::{get_system_time_utc, monotonic_secs};
+pub use local::{get_system_time_us, monotonic_secs};
+// 兼容旧名称
+pub use local::get_system_time_us as get_system_time_utc;
 pub use ntp::get_cached_utc_time;
 pub use provider::get_full_time_data;

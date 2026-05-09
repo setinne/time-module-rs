@@ -11,11 +11,14 @@
 
 mod convert;
 mod days;
+mod jd;
+mod calendar;
 mod sync;
 mod tests;
 
-pub use convert::utc_to_fulltime;
+pub use convert::{utc_to_fulltime, utc_to_fulltime_ns, set_calendar_type, get_calendar_type};
 pub use sync::{check_time_accuracy, get_calibrated_local_time, is_time_synced};
+pub use calendar::CalendarType;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -28,4 +31,16 @@ pub struct FullTime {
     pub second: i32,
     pub ms: i32,
     pub us: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct FullTimeNs {
+    pub year: i32,
+    pub month: i32,
+    pub day: i32,
+    pub hour: i32,
+    pub minute: i32,
+    pub second: i32,
+    pub ns: i32,
 }

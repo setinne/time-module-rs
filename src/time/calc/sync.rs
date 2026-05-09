@@ -14,14 +14,10 @@ use crate::time::core::ntp::get_cached_utc_time;
 use crate::time::core::local::get_system_time_utc;
 
 fn abs_diff_u64(a: u64, b: u64) -> u64 {
-    if a > b {
-        a - b
-    } else {
-        b - a
-    }
+    if a > b { a - b } else { b - a }
 }
 
-/// 检查系统时间是否与 NTP 时间同步（误差在阈值内）
+/// 检查系统时间是否与 NTP 时间同步
 pub fn is_time_synced() -> bool {
     let (sys_sec, _) = get_system_time_utc();
     match get_cached_utc_time() {
@@ -30,10 +26,9 @@ pub fn is_time_synced() -> bool {
     }
 }
 
-/// 获取经校准的本地时间（使用 NTP 如果可用）
+/// 获取经校准的本地时间
 pub fn get_calibrated_local_time() -> (u64, i32) {
     let (sys_sec, sys_us) = get_system_time_utc();
-    
     if let Some((ntp_sec, ntp_us)) = get_cached_utc_time() {
         (ntp_sec, ntp_us)
     } else {
