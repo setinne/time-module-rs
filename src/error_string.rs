@@ -24,6 +24,7 @@ pub fn get_error_string(code: i32) -> *const c_char {
         6 => TimeErrorCode::FileNotFound,
         7 => TimeErrorCode::ParseError,
         8 => TimeErrorCode::CountryNotFound,
+        9 => TimeErrorCode::DstNotAvailable,
         _ => TimeErrorCode::InvalidParam,
     };
     CString::new(err.as_str()).unwrap_or_default().into_raw()
