@@ -9,6 +9,8 @@
 
 // 时间模块入口，对外暴露唯一 C 接口
 
+#![warn(deprecated)]
+
 pub mod error;
 pub mod error_string;
 pub mod resources;
