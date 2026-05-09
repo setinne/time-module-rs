@@ -346,8 +346,8 @@ A: 推荐在卸载 DLL 前调用，确保后台线程正确退出。
 
 | 文件 | 架构 | 大小 |
 |------|------|------|
-| [time_module_upx_x64.dll](https://github.com/setinne/time-module-rs/releases/latest) | 64位 | 368 KB |
-| [time_module_upx_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 | 396 KB |
+| [time_module_upx_x64.dll](https://github.com/setinne/time-module-rs/releases/latest) | 64位 | 360 KB |
+| [time_module_upx_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 | 387 KB |
 
 > Windows Vista 32 位用户若 UPX 压缩版不可用，请使用原始版本。
 
