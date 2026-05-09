@@ -9,14 +9,13 @@
 
 //! 对外 C 接口
 
-
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicI32, Ordering};
 
+use crate::time::calc::{FullTime, FullTimeNs, CalendarType};
 use crate::error::TimeErrorCode;
 use crate::time::{calc, config, tz, dst};
-use crate::time::calc::FullTime;
 
 // ---------- 版本信息 ----------
 pub const VERSION_MAJOR: i32 = 0;
@@ -44,6 +43,23 @@ fn result_to_i32(result: Result<(), TimeErrorCode>) -> i32 {
         Ok(()) => TimeErrorCode::Success as i32,
         Err(e) => e as i32,
     }
+}
+
+/// 设置历法类型（公历/儒略历）
+/// @param type: 0=公历（默认），1=儒略历
+#[no_mangle]
+pub extern "C" fn api_SetCalendarType(cal_type: i32) {
+    match cal_type {
+        1 => crate::time::calc::set_calendar_type(CalendarType::Julian),
+        _ => crate::time::calc::set_calendar_type(CalendarType::Gregorian),
+    }
+}
+
+/// 获取当前历法类型
+/// @return 0=公历，1=儒略历
+#[no_mangle]
+pub extern "C" fn api_GetCalendarType() -> i32 {
+    crate::time::calc::get_calendar_type() as i32
 }
 
 
@@ -89,6 +105,23 @@ pub extern "C" fn api_GetTimezoneOffset() -> i32 {
 #[no_mangle]
 pub extern "C" fn api_GetLastError() -> i32 {
     LAST_ERROR.load(Ordering::Acquire)
+}
+#[no_mangle]
+pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
+    let (secs, ns) = crate::time::core::local::get_system_time_ns();
+    let base_offset = config::get_timezone_offset();
+    let total_secs = secs + base_offset as i64;
+    
+    let ft = crate::time::calc::utc_to_fulltime_ns(total_secs, ns);
+    FullTimeNs {
+        year: ft.year,
+        month: ft.month,
+        day: ft.day,
+        hour: ft.hour,
+        minute: ft.minute,
+        second: ft.second,
+        ns: ft.us * 1000 + ft.ms % 1000,
+    }
 }
 
 // 新增：设置 DST 后端

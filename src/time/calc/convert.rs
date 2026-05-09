@@ -9,39 +9,46 @@
 
 //! 时间戳转换核心逻辑
 
-use super::days::days_to_ymd;
+use super::jd::{julian_day_to_unix_secs, unix_secs_to_julian_day, jd_to_gregorian};
+use super::calendar::{CalendarType, gregorian_to_julian};
 use super::FullTime;
 
-/// 将 Unix 时间戳（秒+微秒）转换为日期时间结构
-/// 支持负数时间戳（1970年之前的日期）
-pub fn utc_to_fulltime(utc_sec: u64, utc_us: i32, tz_offset: i32) -> FullTime {
-    let total_secs = utc_sec as i64 + tz_offset as i64;
-    let us = utc_us.max(0);
-    let ms = us / 1000;
-    unix_timestamp_to_fulltime(total_secs, us, ms)
+static mut CALENDAR_TYPE: CalendarType = CalendarType::Gregorian;
+
+/// 设置历法类型
+pub fn set_calendar_type(cal_type: CalendarType) {
+    unsafe { CALENDAR_TYPE = cal_type; }
 }
 
-/// 将 Unix 时间戳（可能为负数）转换为 FullTime
-fn unix_timestamp_to_fulltime(timestamp: i64, us: i32, ms: i32) -> FullTime {
-    const SECS_PER_DAY: i64 = 86400;
-    const SECS_PER_HOUR: i64 = 3600;
-    const SECS_PER_MIN: i64 = 60;
+/// 获取当前历法类型
+pub fn get_calendar_type() -> CalendarType {
+    unsafe { CALENDAR_TYPE }
+}
 
-    let days = if timestamp >= 0 {
-        timestamp / SECS_PER_DAY
-    } else {
-        (timestamp - (SECS_PER_DAY - 1)) / SECS_PER_DAY
+/// 将 Unix 时间戳（秒+纳秒）转换为日期时间结构
+pub fn utc_to_fulltime_ns(secs: i64, ns: i32) -> FullTime {
+    let jd = unix_secs_to_julian_day(secs);
+    let (year, month, day) = jd_to_gregorian(jd);
+    
+    // 根据历法类型转换
+    let (year, month, day) = match get_calendar_type() {
+        CalendarType::Julian => gregorian_to_julian(year, month, day),
+        CalendarType::Gregorian => (year, month, day),
     };
-
-    let mut remaining_secs = timestamp - days * SECS_PER_DAY;
-    if remaining_secs < 0 {
-        remaining_secs += SECS_PER_DAY;
-    }
-
-    let hour = (remaining_secs / SECS_PER_HOUR) as i32;
-    let minute = ((remaining_secs % SECS_PER_HOUR) / SECS_PER_MIN) as i32;
-    let second = (remaining_secs % SECS_PER_MIN) as i32;
-    let (year, month, day) = days_to_ymd(days);
-
+    
+    let rem_secs = secs - julian_day_to_unix_secs(jd);
+    let hour = (rem_secs / 3600) as i32;
+    let minute = ((rem_secs % 3600) / 60) as i32;
+    let second = (rem_secs % 60) as i32;
+    let ms = ns / 1_000_000;
+    let us = ns / 1_000;
+    
     FullTime { year, month, day, hour, minute, second, ms, us }
+}
+
+/// 将 Unix 时间戳（秒+微秒）转换为日期时间结构（保持兼容）
+pub fn utc_to_fulltime(secs: u64, us: i32, tz_offset: i32) -> FullTime {
+    let total_secs = secs as i64 + tz_offset as i64;
+    let ns = us * 1000;
+    utc_to_fulltime_ns(total_secs, ns)
 }

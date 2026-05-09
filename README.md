@@ -355,12 +355,13 @@ A: 支持。内部使用 64 位时间戳，可正确处理到 5849 年。
 
 ## 📥 下载
 
-### 最新版本：v0.2.5
+
+### 最新版本：v0.2.6
 
 | 文件 | 架构 | 大小 |
 |------|------|------|
 | [time_module_upx_x64.dll](https://github.com/setinne/time-module-rs/releases/latest) | 64位 | 369 KB |
-| [time_module_upx_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 | 396 KB |
+| [time_module_upx_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 | 397 KB |
 
 > Windows Vista 32 位用户若 UPX 压缩版不可用，请使用原始版本。
 
