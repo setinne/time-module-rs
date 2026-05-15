@@ -13,6 +13,7 @@ use crate::error::TimeErrorCode;
 use std::ffi::CString;
 use std::os::raw::c_char;
 
+
 pub fn get_error_string(code: i32) -> *const c_char {
     let err = match code {
         0 => TimeErrorCode::Success,
@@ -26,6 +27,9 @@ pub fn get_error_string(code: i32) -> *const c_char {
         8 => TimeErrorCode::CountryNotFound,
         9 => TimeErrorCode::DstNotAvailable,
         10 => TimeErrorCode::InternalPanic,
+        12 => TimeErrorCode::NotInitialized,
+        13 => TimeErrorCode::InvalidDate,
+        14 => TimeErrorCode::BufferTooSmall,
         _ => TimeErrorCode::UnknownError,
     };
     // 统一使用动态分配，调用者必须释放
