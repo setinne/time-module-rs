@@ -20,9 +20,12 @@ pub enum TimeErrorCode {
     FileNotFound = 6,
     ParseError = 7,
     CountryNotFound = 8,
-    DstNotAvailable = 9,  // DST 规则不可用（无规则或已禁用）
-    InternalPanic = 10,   // 内部 panic
-    UnknownError = 11,    // 未知错误
+    DstNotAvailable = 9,
+    InternalPanic = 10,
+    UnknownError = 11,
+    NotInitialized = 12,
+    InvalidDate = 13,
+    BufferTooSmall = 14,
 }
 
 impl TimeErrorCode {
@@ -40,7 +43,9 @@ impl TimeErrorCode {
             TimeErrorCode::DstNotAvailable => "DST not available (no rule or disabled)",
             TimeErrorCode::InternalPanic => "Internal panic occurred",
             TimeErrorCode::UnknownError => "Unknown error",
+            TimeErrorCode::NotInitialized => "Component not initialized",
+            TimeErrorCode::InvalidDate => "Invalid date",
+            TimeErrorCode::BufferTooSmall => "Buffer too small",
         }
     }
 }
-pub use TimeErrorCode as TimeError;
