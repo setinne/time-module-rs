@@ -14,12 +14,15 @@ mod updater;
 
 use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use std::sync::Once;
+use std::thread::JoinHandle;
 
 static CACHED_SEC: AtomicU64 = AtomicU64::new(0);
 static CACHED_US: AtomicU64 = AtomicU64::new(0);
 static AVAILABLE: AtomicBool = AtomicBool::new(false);
 static START_ONCE: Once = Once::new();
-static SHUTDOWN: AtomicBool = AtomicBool::new(false);  //退出标志
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+static mut THREAD_HANDLE: Option<JoinHandle<()>> = None;
 
 pub fn is_started() -> bool {
     START_ONCE.is_completed()
@@ -27,9 +30,10 @@ pub fn is_started() -> bool {
 
 pub fn get_cached_utc_time() -> Option<(u64, i32)> {
     START_ONCE.call_once(|| { 
-        std::thread::spawn(|| {
+        let handle = std::thread::spawn(|| {
             updater::ntp_updater_with_shutdown();
         });
+        unsafe { THREAD_HANDLE = Some(handle); }
     });
     
     if AVAILABLE.load(Ordering::Acquire) {
@@ -61,4 +65,9 @@ pub(crate) fn update_cache(sec: u64, us: i32) {
 /// 关闭 NTP 后台线程（DLL 卸载时调用）
 pub fn shutdown() {
     SHUTDOWN.store(true, Ordering::Release);
+    unsafe {
+        if let Some(handle) = THREAD_HANDLE.take() {
+            let _ = handle.join();
+        }
+    }
 }

@@ -35,9 +35,9 @@ pub fn get_dll_hinstance() -> *mut std::ffi::c_void {
 extern "system" fn DllMain(hinstDLL: *mut std::ffi::c_void, fdwReason: u32, _lpvReserved: *mut std::ffi::c_void) -> u32 {
     match fdwReason {
         0 => {  // DLL_PROCESS_DETACH
-            // 仅设置退出标志，不执行 join（避免死锁）
-            crate::time::core::ntp::shutdown();
-        }
+            // 不执行任何操作，让调用者负责清理
+            // 如果调用者未调用 api_Shutdown，线程可能仍在运行，但这是用户的责任
+}
         1 => {  // DLL_PROCESS_ATTACH
             // DLL 加载时的初始化
             unsafe { DLL_HINSTANCE = hinstDLL; }

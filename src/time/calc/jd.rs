@@ -7,10 +7,10 @@
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
 
-//! 儒略日与公历互转（基于 Fliegel-Van Flandern 算法）
-//! 支持范围：公元前 4713 年至公元后 9999 年（proleptic Gregorian）
+//! 儒略日与公历互转（Fliegel-Van Flandern 算法）
+//! 支持范围：公元前 4713 年至公元后 9999 年
 
-/// 公历 → 儒略日（Julian Day Number）
+/// 公历 → 儒略日
 pub fn gregorian_to_jd(year: i32, month: i32, day: i32) -> i64 {
     let a = (14 - month) / 12;
     let y = (year + 4800 - a) as i64;
@@ -32,17 +32,21 @@ pub fn jd_to_gregorian(jd: i64) -> (i32, i32, i32) {
     (year, month, day)
 }
 
-/// Unix 纪元（1970-01-01）的儒略日
+/// 儒略历 → 儒略日（用于儒略历的星期计算）
+pub fn julian_to_jd(year: i32, month: i32, day: i32) -> i64 {
+    let a = (14 - month) / 12;
+    let y = (year + 4800 - a) as i64;
+    let m = (month + 12 * a - 3) as i64;
+    day as i64 + (153 * m + 2) / 5 + 365 * y + y / 4 - 32083
+}
+
 pub const JULIAN_DAY_EPOCH: i64 = 2440588;
 
-/// 儒略日 → Unix 时间戳（秒）
 pub fn julian_day_to_unix_secs(jd: i64) -> i64 {
     (jd - JULIAN_DAY_EPOCH) * 86400
 }
 
-/// Unix 时间戳（秒）→ 儒略日
 pub fn unix_secs_to_julian_day(secs: i64) -> i64 {
-    // 使用欧几里得除法正确处理负数
     JULIAN_DAY_EPOCH + secs.div_euclid(86400)
 }
 
@@ -64,14 +68,13 @@ mod tests {
 
     #[test]
     fn test_leap_day() {
-        let jd = gregorian_to_jd(2000, 2, 29);
-        assert_eq!(jd, 2451604);
-        assert_eq!(jd_to_gregorian(jd), (2000, 2, 29));
+        assert_eq!(gregorian_to_jd(2000, 2, 29), 2451604);
+        assert_eq!(jd_to_gregorian(2451604), (2000, 2, 29));
     }
 
     #[test]
     fn test_negative_unix() {
-        let secs = -86400; // 1969-12-31 UTC
+        let secs = -86400;
         let jd = unix_secs_to_julian_day(secs);
         assert_eq!(jd, 2440587);
         let (y, m, d) = jd_to_gregorian(jd);

@@ -77,7 +77,7 @@ fn is_valid_date(year: i32, month: i32, day: i32) -> bool {
     }
     let days_in_month = match month {
         2 => {
-            let leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+            let leap = api_IsLeapYear(year);
             if leap { 29 } else { 28 }
         }
         4 | 6 | 9 | 11 => 30,
@@ -92,7 +92,7 @@ fn is_valid_date(year: i32, month: i32, day: i32) -> bool {
 
 pub const VERSION_MAJOR: i32 = 0;
 pub const VERSION_MINOR: i32 = 2;
-pub const VERSION_PATCH: i32 = 11;
+pub const VERSION_PATCH: i32 = 12;
 
 /// 获取 DLL 版本号（编码为 0xMMmmpp）
 #[no_mangle]
@@ -262,8 +262,12 @@ pub extern "C" fn api_GetFormattedTime() -> *const c_char {
 /// 返回实际写入的字节数（不含 null），失败返回 -1
 #[no_mangle]
 pub extern "C" fn api_GetFormattedTimeBuf(buf: *mut u8, buf_size: i32) -> i32 {
-    if buf.is_null() || buf_size <= 0 {
+    if buf.is_null() {
         LAST_ERROR.store(TimeErrorCode::InvalidParam as i32, Ordering::Release);
+        return -1;  
+    }
+    if buf_size <= 0 {
+        LAST_ERROR.store(TimeErrorCode::BufferTooSmall as i32, Ordering::Release);
         return -1;
     }
 
@@ -387,17 +391,17 @@ pub extern "C" fn api_SetTimezoneByLocationEx(
 /// 获取基础时区偏移（不含 DST），失败返回 -1
 #[no_mangle]
 pub extern "C" fn api_GetBaseOffsetByLocation(lon: f64, lat: f64, code: *const c_char) -> i32 {
-    let country = if code.is_null() {
-        None
-    } else {
+    let country = if code.is_null() { None } else {
         unsafe { std::ffi::CStr::from_ptr(code).to_str().ok() }
     };
     match tz::offset_from_location(lon, lat, country) {
         Ok(offset) => offset,
-        Err(_) => -1,
+        Err(e) => {
+            LAST_ERROR.store(e as i32, Ordering::Release);
+            -1
+        }
     }
 }
-
 // ============================================================================
 // DST 查询与控制
 // ============================================================================
@@ -682,8 +686,12 @@ pub extern "C" fn api_GetWeekdayNameBuf(year: i32, month: i32, day: i32, buf: *m
         LAST_ERROR.store(TimeErrorCode::InvalidDate as i32, Ordering::Release);
         return -1;
     }
-    if buf.is_null() || buf_size <= 0 {
+    if buf.is_null() {
         LAST_ERROR.store(TimeErrorCode::InvalidParam as i32, Ordering::Release);
+        return -1;
+    }
+    if buf_size <= 0 {
+        LAST_ERROR.store(TimeErrorCode::BufferTooSmall as i32, Ordering::Release);
         return -1;
     }
     let name = crate::time::calc::weekday_name(year, month, day);
@@ -707,8 +715,12 @@ pub extern "C" fn api_GetWeekdayNameZhBuf(year: i32, month: i32, day: i32, buf: 
         LAST_ERROR.store(TimeErrorCode::InvalidDate as i32, Ordering::Release);
         return -1;
     }
-    if buf.is_null() || buf_size <= 0 {
+    if buf.is_null() {
         LAST_ERROR.store(TimeErrorCode::InvalidParam as i32, Ordering::Release);
+        return -1;
+    }
+    if buf_size <= 0 {
+        LAST_ERROR.store(TimeErrorCode::BufferTooSmall as i32, Ordering::Release);
         return -1;
     }
     let name = crate::time::calc::weekday_name_zh(year, month, day);
@@ -763,7 +775,7 @@ pub extern "C" fn api_GetUnixTimestampNs() -> i64 {
 /// 判断是否为闰年
 #[no_mangle]
 pub extern "C" fn api_IsLeapYear(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    (year.rem_euclid(4) == 0 && year.rem_euclid(100) != 0) || year.rem_euclid(400) == 0
 }
 
 /// 判断是否为闰年（Ex 版本，返回 1/0）

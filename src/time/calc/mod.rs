@@ -20,7 +20,7 @@ pub use convert::{utc_to_fulltime, utc_to_fulltime_ns, set_calendar_type, get_ca
 pub use sync::{check_time_accuracy, get_calibrated_local_time, is_time_synced};
 pub use calendar::CalendarType;
 pub use weekday::{weekday, weekday_iso, weekday_name, weekday_name_zh};
-
+pub use jd::{gregorian_to_jd, julian_to_jd};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

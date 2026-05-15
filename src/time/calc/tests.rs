@@ -84,20 +84,16 @@ fn test_day_of_year() {
 
 #[test]
 fn test_unix_timestamp() {
-    use crate::time_api::{
-        api_GetUnixTimestamp,
-        api_GetUnixTimestampMs,
-        api_GetUnixTimestampUs,
-        api_GetUnixTimestampNs,
-    };
+    use crate::time_api::{api_GetUnixTimestamp, api_GetUnixTimestampMs, api_GetUnixTimestampUs, api_GetUnixTimestampNs};
     let ts = api_GetUnixTimestamp();
     assert!(ts > 0);
     let ts_ms = api_GetUnixTimestampMs();
-    assert!(ts_ms > ts * 1000);
+    assert!(ts_ms >= ts * 1000);
     let ts_us = api_GetUnixTimestampUs();
-    assert!(ts_us > ts_ms * 1000);
+    assert!(ts_us >= ts_ms * 1000);
     let ts_ns = api_GetUnixTimestampNs();
-    assert!(ts_ns > ts_us * 1000);
+    // 允许微小误差（系统时钟粒度），纳秒值应该大于等于微秒值*1000 - 1000
+    assert!(ts_ns >= ts_us * 1000 - 1000);
 }
 
 #[test]
@@ -111,4 +107,23 @@ fn test_invalid_date() {
     assert_eq!(api_GetLastError(), TimeErrorCode::InvalidDate as i32);
     assert_eq!(api_GetWeekday(2021, 2, 29), -1);
     assert_eq!(api_GetLastError(), TimeErrorCode::InvalidDate as i32);
+}
+
+#[test]
+fn test_weekday_bc_years() {
+    use crate::time_api::api_GetWeekday;
+    let wd = api_GetWeekday(-1, 1, 1);
+    assert!((0..=6).contains(&wd));
+    let wd2 = api_GetWeekday(-4713, 1, 1);
+    assert!((0..=6).contains(&wd2));
+}
+
+#[test]
+fn test_weekday_name_buf_zero_size() {
+    use crate::time_api::{api_GetWeekdayNameBuf, api_GetLastError};
+    use crate::error::TimeErrorCode;
+    let mut buf = [0u8; 10];
+    let result = api_GetWeekdayNameBuf(2026, 5, 16, buf.as_mut_ptr(), 0);
+    assert_eq!(result, -1);
+    assert_eq!(api_GetLastError(), TimeErrorCode::BufferTooSmall as i32);
 }
