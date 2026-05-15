@@ -1,5 +1,6 @@
 [package]
 name = "time_module"
+version = "0.2.12"
 edition = "2021"
 license = "LGPL-2.1-only"
 authors = ["Setinne"]
@@ -20,3 +21,4 @@ panic = "unwind"
 [profile.release.build-override]
 opt-level = 0
 
+# 无任何依赖
