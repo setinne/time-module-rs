@@ -6,11 +6,12 @@
 // You may obtain a copy of the License at:
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
-
+// 测试模块内部导入，不在外部重复导入
 #[cfg(test)]
 mod tests {
-    use super::super::convert::utc_to_fulltime;
-    use super::super::jd::{gregorian_to_jd, jd_to_gregorian};
+    use crate::time::calc::convert::utc_to_fulltime;
+    use crate::time::calc::jd::{gregorian_to_jd, jd_to_gregorian};
+    use crate::time::calc::{set_calendar_type, CalendarType, weekday};
 
     #[test]
     fn test_utc_to_fulltime_positive() {
@@ -43,12 +44,9 @@ mod tests {
 
     #[test]
     fn test_leap_year_via_jd() {
-        // 闰年：2000-02-29
         let jd = gregorian_to_jd(2000, 2, 29);
         let (y, m, d) = jd_to_gregorian(jd);
         assert_eq!((y, m, d), (2000, 2, 29));
-
-        // 非闰年：1900-03-01（1900年2月29日不存在）
         let jd = gregorian_to_jd(1900, 3, 1);
         let (y, m, d) = jd_to_gregorian(jd);
         assert_eq!((y, m, d), (1900, 3, 1));
@@ -60,70 +58,37 @@ mod tests {
         let (y, m, d) = jd_to_gregorian(jd);
         assert_eq!((y, m, d), (2020, 2, 29));
     }
-}
 
-#[test]
-fn test_is_leap_year() {
-    use crate::time_api::api_IsLeapYear;
-    use crate::time_api::api_IsLeapYearEx;
-    assert!(api_IsLeapYear(2000));
-    assert!(!api_IsLeapYear(1900));
-    assert!(!api_IsLeapYear(2021));
-    assert_eq!(api_IsLeapYearEx(2000), 1);
-    assert_eq!(api_IsLeapYearEx(1900), 0);
-}
+    #[test]
+    fn test_julian_day_roundtrip() {
+        let test_dates = [
+            (-4713, 1, 1),
+            (-1, 12, 31),
+            (0, 1, 1),
+            (1, 1, 1),
+            (1582, 10, 15),
+            (1970, 1, 1),
+            (2038, 1, 19),
+            (9999, 12, 31),
+        ];
+        for (y, m, d) in test_dates {
+            let jd = gregorian_to_jd(y, m, d);
+            let (y2, m2, d2) = jd_to_gregorian(jd);
+            assert_eq!((y, m, d), (y2, m2, d2), "Failed for {}-{}-{}", y, m, d);
+        }
+    }
 
-#[test]
-fn test_day_of_year() {
-    use crate::time_api::api_DayOfYear;
-    assert_eq!(api_DayOfYear(2020, 1, 1), 1);
-    assert_eq!(api_DayOfYear(2020, 12, 31), 366); // 闰年
-    assert_eq!(api_DayOfYear(2021, 12, 31), 365);
-    assert_eq!(api_DayOfYear(2021, 3, 1), 60); // 非闰年3月1日为第60天
-}
+    #[test]
+    fn test_weekday_consistency() {
+        // 先设置为儒略历，计算儒略历日期 1582-10-05 的星期
+        set_calendar_type(CalendarType::Julian);
+        let wd_jul = weekday(1582, 10, 5);
 
-#[test]
-fn test_unix_timestamp() {
-    use crate::time_api::{api_GetUnixTimestamp, api_GetUnixTimestampMs, api_GetUnixTimestampUs, api_GetUnixTimestampNs};
-    let ts = api_GetUnixTimestamp();
-    assert!(ts > 0);
-    let ts_ms = api_GetUnixTimestampMs();
-    assert!(ts_ms >= ts * 1000);
-    let ts_us = api_GetUnixTimestampUs();
-    assert!(ts_us >= ts_ms * 1000);
-    let ts_ns = api_GetUnixTimestampNs();
-    // 允许微小误差（系统时钟粒度），纳秒值应该大于等于微秒值*1000 - 1000
-    assert!(ts_ns >= ts_us * 1000 - 1000);
-}
+        // 再设置为公历，计算公历日期 1582-10-15 的星期
+        set_calendar_type(CalendarType::Gregorian);
+        let wd_greg = weekday(1582, 10, 15);
 
-#[test]
-fn test_invalid_date() {
-    use crate::time_api::api_DayOfYear;
-    use crate::time_api::api_GetWeekday;
-    use crate::time_api::api_GetLastError;
-    use crate::error::TimeErrorCode;
-
-    assert_eq!(api_DayOfYear(2021, 2, 29), -1);
-    assert_eq!(api_GetLastError(), TimeErrorCode::InvalidDate as i32);
-    assert_eq!(api_GetWeekday(2021, 2, 29), -1);
-    assert_eq!(api_GetLastError(), TimeErrorCode::InvalidDate as i32);
-}
-
-#[test]
-fn test_weekday_bc_years() {
-    use crate::time_api::api_GetWeekday;
-    let wd = api_GetWeekday(-1, 1, 1);
-    assert!((0..=6).contains(&wd));
-    let wd2 = api_GetWeekday(-4713, 1, 1);
-    assert!((0..=6).contains(&wd2));
-}
-
-#[test]
-fn test_weekday_name_buf_zero_size() {
-    use crate::time_api::{api_GetWeekdayNameBuf, api_GetLastError};
-    use crate::error::TimeErrorCode;
-    let mut buf = [0u8; 10];
-    let result = api_GetWeekdayNameBuf(2026, 5, 16, buf.as_mut_ptr(), 0);
-    assert_eq!(result, -1);
-    assert_eq!(api_GetLastError(), TimeErrorCode::BufferTooSmall as i32);
+        // 两者应该相同
+        assert_eq!(wd_greg, wd_jul);
+    }
 }

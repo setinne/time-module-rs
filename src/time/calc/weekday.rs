@@ -10,8 +10,7 @@
 //! 星期几计算，基于儒略日，支持 proleptic Gregorian 日历（包括公元前年份）
 
 use super::jd::{gregorian_to_jd, julian_to_jd};
-use super::get_calendar_type;
-use super::CalendarType;
+use crate::time::calc::{get_calendar_type, CalendarType};
 
 pub fn weekday(year: i32, month: i32, day: i32) -> i32 {
     let jd = match get_calendar_type() {
@@ -66,7 +65,6 @@ mod tests {
 
     #[test]
     fn test_weekday_bc() {
-        // 公元前年份，不应 panic，且返回值应在 0-6 之间
         let w = weekday(-4713, 1, 1);
         assert!((0..=6).contains(&w));
         let w2 = weekday(-1, 12, 31);

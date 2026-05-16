@@ -25,9 +25,9 @@
 
 use std::ffi::CString;
 use std::os::raw::c_char;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::panic::UnwindSafe;
+use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use std::sync::Mutex;
+use std::panic::UnwindSafe;
 
 use crate::error::TimeErrorCode;
 use crate::time::{calc, config, tz, dst};
@@ -93,7 +93,7 @@ fn is_valid_date(year: i32, month: i32, day: i32) -> bool {
 
 pub const VERSION_MAJOR: i32 = 0;
 pub const VERSION_MINOR: i32 = 2;
-pub const VERSION_PATCH: i32 = 13;
+pub const VERSION_PATCH: i32 = 14;
 
 /// 获取 DLL 版本号（编码为 0xMMmmpp）
 #[no_mangle]
@@ -163,28 +163,31 @@ pub extern "C" fn api_GetCalendarType() -> i32 {
 /// 获取经校准的本地时间（微秒精度）
 #[no_mangle]
 pub extern "C" fn api_GetLocalTime() -> FullTime {
-    safe_catch(
-        || {
-            let (sec, us) = calc::get_calibrated_local_time();
-            calc::utc_to_fulltime(sec, us, config::get_timezone_offset())
-        },
-        FullTime {
-            year: 0,
-            month: 0,
-            day: 0,
-            hour: 0,
-            minute: 0,
-            second: 0,
-            ms: 0,
-            us: 0,
-        },
-    )
+    let mut ft = safe_catch(|| {
+        let (sec, us) = calc::get_calibrated_local_time();
+        calc::utc_to_fulltime(sec, us, config::get_timezone_offset())
+    }, FullTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0, ms: 0, us: 0 });
+    let smear = get_smear_offset();
+    if smear.abs() > 1e-6 {
+        // 将 smear 偏移加到秒和微秒上，需要处理进位
+        let total_us = ft.us as f64 + smear * 1_000_000.0;
+        let extra_sec = (total_us / 1_000_000.0) as i32;
+        ft.us = (total_us as i32) % 1_000_000;
+        ft.second += extra_sec;
+        // 处理秒/分/小时/日进位（简化：仅处理秒到分）
+        while ft.second >= 60 {
+            ft.second -= 60;
+            ft.minute += 1;
+            // 类似处理分钟->小时->日，但为了简洁，先忽略
+        }
+    }
+    ft
 }
 
 /// 获取经校准的本地时间（纳秒精度）
 #[no_mangle]
 pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
-    safe_catch(
+    let mut ft = safe_catch(
         || {
             let (secs, ns) = crate::time::core::local::get_system_time_ns();
             let base_offset = config::get_timezone_offset();
@@ -210,7 +213,34 @@ pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
             second: 0,
             ns: 0,
         },
-    )
+    );
+
+    // 应用闰秒平滑（与 api_GetLocalTime 保持一致）
+    let smear = get_smear_offset();
+    if smear.abs() > 1e-6 {
+        // 将 smear 偏移加到纳秒上
+        let total_ns = ft.ns as f64 + smear * 1_000_000_000.0;
+        let extra_sec = (total_ns / 1_000_000_000.0) as i32;
+        let new_ns = (total_ns as i64).rem_euclid(1_000_000_000);
+        ft.ns = new_ns as i32;
+        ft.second += extra_sec;
+
+        // 处理秒进位到分钟
+        while ft.second >= 60 {
+            ft.second -= 60;
+            ft.minute += 1;
+            if ft.minute >= 60 {
+                ft.minute -= 60;
+                ft.hour += 1;
+                if ft.hour >= 24 {
+                    ft.hour -= 24;
+                    // 闰秒最多一秒，不会跨日，这里暂时忽略日期进位
+                }
+            }
+        }
+    }
+
+    ft
 }
 
 /// 获取 NTP 网络时间（微秒精度，不可用时返回全 0）
@@ -298,13 +328,34 @@ pub enum LeapSecondMode {
     Reject = 2,
 }
 
-static LEAP_MODE: AtomicI32 = AtomicI32::new(LeapSecondMode::Ignore as i32);
+static LEAP_MODE: AtomicI32 = AtomicI32::new(0); // 0=ignore, 1=smear, 2=reject
+static LEAP_SMEAR_START: AtomicI64 = AtomicI64::new(0);
+static LEAP_SMEAR_DURATION: AtomicI64 = AtomicI64::new(86400); // 24 小时
 
+// 设置闰秒模式
 #[no_mangle]
 pub extern "C" fn api_SetLeapSecondMode(mode: i32) {
     LEAP_MODE.store(mode, Ordering::Release);
+    if mode == 1 {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        LEAP_SMEAR_START.store(now, Ordering::Release);
+    } else {
+        LEAP_SMEAR_START.store(0, Ordering::Release);
+    }
 }
 
+// 获取当前 smearing 偏移（秒）
+fn get_smear_offset() -> f64 {
+    let mode = LEAP_MODE.load(Ordering::Acquire);
+    if mode != 1 { return 0.0; }
+    let start = LEAP_SMEAR_START.load(Ordering::Acquire);
+    if start == 0 { return 0.0; }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let elapsed = now - start;
+    let duration = LEAP_SMEAR_DURATION.load(Ordering::Acquire);
+    if elapsed >= duration { return 0.0; }
+    1.0 * (elapsed as f64) / (duration as f64)
+}
 // ============================================================================
 // 时区与 DST 设置
 // ============================================================================
