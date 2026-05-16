@@ -55,6 +55,7 @@ impl NtpPacket {
         self.stratum() != 0 &&
         // 检查传输时间戳不为 0
         self.transmit_timestamp_sec() > 0
+        
     }
     
     fn receive_timestamp_sec(&self) -> u64 {

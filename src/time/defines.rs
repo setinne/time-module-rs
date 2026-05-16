@@ -6,11 +6,15 @@
 // You may obtain a copy of the License at:
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
+
 // 常量定义
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const SYNC_THRESHOLD_SECONDS: u64 = 60;
 pub const DEFAULT_NTP_UPDATE_INTERVAL_SEC: u64 = 3600;
+pub const NTP_INITIAL_RETRY_INTERVAL_SEC: u64 = 10;
+pub const NTP_MAX_RETRY_INTERVAL_SEC: u64 = 3600;
+pub const NTP_RETRY_MULTIPLIER: u64 = 2;
 
 static NTP_UPDATE_INTERVAL_SEC: AtomicU64 = AtomicU64::new(DEFAULT_NTP_UPDATE_INTERVAL_SEC);
 

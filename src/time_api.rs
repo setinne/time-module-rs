@@ -27,6 +27,7 @@ use std::ffi::CString;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::panic::UnwindSafe;
+use std::sync::Mutex;
 
 use crate::error::TimeErrorCode;
 use crate::time::{calc, config, tz, dst};
@@ -92,7 +93,7 @@ fn is_valid_date(year: i32, month: i32, day: i32) -> bool {
 
 pub const VERSION_MAJOR: i32 = 0;
 pub const VERSION_MINOR: i32 = 2;
-pub const VERSION_PATCH: i32 = 12;
+pub const VERSION_PATCH: i32 = 13;
 
 /// 获取 DLL 版本号（编码为 0xMMmmpp）
 #[no_mangle]
@@ -288,6 +289,20 @@ pub extern "C" fn api_GetFormattedTimeBuf(buf: *mut u8, buf_size: i32) -> i32 {
         *buf.add(bytes.len()) = 0;
     }
     bytes.len() as i32
+}
+
+#[repr(C)]
+pub enum LeapSecondMode {
+    Ignore = 0,
+    Smear = 1,
+    Reject = 2,
+}
+
+static LEAP_MODE: AtomicI32 = AtomicI32::new(LeapSecondMode::Ignore as i32);
+
+#[no_mangle]
+pub extern "C" fn api_SetLeapSecondMode(mode: i32) {
+    LEAP_MODE.store(mode, Ordering::Release);
 }
 
 // ============================================================================
@@ -798,6 +813,42 @@ pub extern "C" fn api_DayOfYear(year: i32, month: i32, day: i32) -> i32 {
         total += if m == 2 && is_leap { 29 } else { days_in_month[(m - 1) as usize] };
     }
     total + day
+}
+
+// ============================================================================
+// 日志回调
+// ============================================================================
+
+// 日志等级
+#[repr(C)]
+pub enum LogLevel {
+    Debug = 0,
+    Info = 1,
+    Warning = 2,
+    Error = 3,
+}
+
+// 日志回调类型
+type LogCallback = extern "C" fn(level: i32, msg: *const c_char);
+
+static mut LOG_CALLBACK: Option<LogCallback> = None;
+static LOG_MUTEX: Mutex<()> = Mutex::new(());
+
+#[no_mangle]
+pub extern "C" fn api_SetLogCallback(callback: Option<LogCallback>) {
+    let _lock = LOG_MUTEX.lock();
+    unsafe { LOG_CALLBACK = callback; }
+}
+
+// 内部函数，在需要日志的地方调用
+fn log(level: LogLevel, msg: &str) {
+    let _lock = LOG_MUTEX.lock();
+    unsafe {
+        if let Some(cb) = LOG_CALLBACK {
+            let c_msg = CString::new(msg).unwrap_or_default();
+            cb(level as i32, c_msg.as_ptr());
+        }
+    }
 }
 
 // ============================================================================

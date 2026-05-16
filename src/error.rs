@@ -26,6 +26,9 @@ pub enum TimeErrorCode {
     NotInitialized = 12,
     InvalidDate = 13,
     BufferTooSmall = 14,
+    NtpServerUnreachable = 15,
+    NtpResponseInvalid = 16,
+    LogCallbackNotSet = 17,
 }
 
 impl TimeErrorCode {
@@ -46,6 +49,9 @@ impl TimeErrorCode {
             TimeErrorCode::NotInitialized => "Component not initialized",
             TimeErrorCode::InvalidDate => "Invalid date",
             TimeErrorCode::BufferTooSmall => "Buffer too small",
+            TimeErrorCode::NtpServerUnreachable => "NTP server unreachable",
+            TimeErrorCode::NtpResponseInvalid => "Invalid NTP response",
+            TimeErrorCode::LogCallbackNotSet => "Log callback not set",
         }
     }
 }

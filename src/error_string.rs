@@ -30,6 +30,9 @@ pub fn get_error_string(code: i32) -> *const c_char {
         12 => TimeErrorCode::NotInitialized,
         13 => TimeErrorCode::InvalidDate,
         14 => TimeErrorCode::BufferTooSmall,
+        15 => TimeErrorCode::NtpServerUnreachable,
+        16 => TimeErrorCode::NtpResponseInvalid,
+        17 => TimeErrorCode::LogCallbackNotSet,
         _ => TimeErrorCode::UnknownError,
     };
     // 统一使用动态分配，调用者必须释放
