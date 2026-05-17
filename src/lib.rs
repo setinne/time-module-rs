@@ -6,6 +6,29 @@
 // You may obtain a copy of the License at:
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
+//! # time_module
+//!
+//! A high-precision NTP time & timezone library for Windows (Vista+)
+//!
+//! This library provides:
+//! - NTP time synchronization with microsecond precision
+//! - Timezone conversion via offset/name/location
+//! - Daylight Saving Time (DST) support
+//! - Julian/Gregorian calendar support
+//! - Unix timestamp, weekday, and leap year utilities
+//!
+//! # Example
+//!
+//! ```no_run
+//! use time_module::api_GetFormattedTimeBuf;
+//!
+//! let mut buf = [0u8; 64];
+//! let len = unsafe { api_GetFormattedTimeBuf(buf.as_mut_ptr(), buf.len() as i32) };
+//! if len > 0 {
+//!     println!("Current time: {}", String::from_utf8_lossy(&buf[..len as usize]));
+//! }
+//! ```
+
 
 // 时间模块入口，对外暴露唯一 C 接口
 

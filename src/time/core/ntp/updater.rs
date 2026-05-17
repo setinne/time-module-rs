@@ -8,9 +8,11 @@
 
 
 // 后台线程定期更新 NTP 缓存
+
 use std::time::Duration;
 use std::thread;
 use std::sync::atomic::Ordering;
+
 use crate::time::defines::{
     NTP_INITIAL_RETRY_INTERVAL_SEC,
     NTP_MAX_RETRY_INTERVAL_SEC,

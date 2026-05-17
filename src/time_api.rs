@@ -22,6 +22,7 @@
 //! 10. 星期函数
 //! 11. Unix 时间戳
 //! 12. 日期工具
+//! 13. 日志回调
 
 use std::ffi::CString;
 use std::os::raw::c_char;
@@ -45,6 +46,23 @@ pub enum NTPStatus {
     Syncing = 1,
     Synced = 2,
     OffsetLarge = 3,
+}
+
+/// 闰秒处理模式
+#[repr(C)]
+pub enum LeapSecondMode {
+    Ignore = 0,
+    Smear = 1,
+    Reject = 2,
+}
+
+/// 日志等级
+#[repr(C)]
+pub enum LogLevel {
+    Debug = 0,
+    Info = 1,
+    Warning = 2,
+    Error = 3,
 }
 
 // ============================================================================
@@ -93,7 +111,7 @@ fn is_valid_date(year: i32, month: i32, day: i32) -> bool {
 
 pub const VERSION_MAJOR: i32 = 0;
 pub const VERSION_MINOR: i32 = 2;
-pub const VERSION_PATCH: i32 = 14;
+pub const VERSION_PATCH: i32 = 15;
 
 /// 获取 DLL 版本号（编码为 0xMMmmpp）
 #[no_mangle]
@@ -157,30 +175,94 @@ pub extern "C" fn api_GetCalendarType() -> i32 {
 }
 
 // ============================================================================
+// 闰秒控制
+// ============================================================================
+
+static LEAP_MODE: AtomicI32 = AtomicI32::new(LeapSecondMode::Ignore as i32);
+static LEAP_SMEAR_START: AtomicI64 = AtomicI64::new(0);
+static LEAP_SMEAR_DURATION: AtomicI64 = AtomicI64::new(86400); // 24 小时
+
+/// 设置闰秒处理模式
+#[no_mangle]
+pub extern "C" fn api_SetLeapSecondMode(mode: i32) {
+    LEAP_MODE.store(mode, Ordering::Release);
+    if mode == LeapSecondMode::Smear as i32 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        LEAP_SMEAR_START.store(now, Ordering::Release);
+    } else {
+        LEAP_SMEAR_START.store(0, Ordering::Release);
+    }
+}
+
+/// 获取当前 smearing 偏移（秒）
+fn get_smear_offset() -> f64 {
+    let mode = LEAP_MODE.load(Ordering::Acquire);
+    if mode != LeapSecondMode::Smear as i32 {
+        return 0.0;
+    }
+    let start = LEAP_SMEAR_START.load(Ordering::Acquire);
+    if start == 0 {
+        return 0.0;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let elapsed = now - start;
+    let duration = LEAP_SMEAR_DURATION.load(Ordering::Acquire);
+    if elapsed >= duration {
+        return 0.0;
+    }
+    1.0 * (elapsed as f64) / (duration as f64)
+}
+
+// ============================================================================
 // 核心时间获取
 // ============================================================================
 
 /// 获取经校准的本地时间（微秒精度）
 #[no_mangle]
 pub extern "C" fn api_GetLocalTime() -> FullTime {
-    let mut ft = safe_catch(|| {
-        let (sec, us) = calc::get_calibrated_local_time();
-        calc::utc_to_fulltime(sec, us, config::get_timezone_offset())
-    }, FullTime { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0, ms: 0, us: 0 });
+    let mut ft = safe_catch(
+        || {
+            let (sec, us) = calc::get_calibrated_local_time();
+            calc::utc_to_fulltime(sec, us, config::get_timezone_offset())
+        },
+        FullTime {
+            year: 0,
+            month: 0,
+            day: 0,
+            hour: 0,
+            minute: 0,
+            second: 0,
+            ms: 0,
+            us: 0,
+        },
+    );
+
     let smear = get_smear_offset();
     if smear.abs() > 1e-6 {
-        // 将 smear 偏移加到秒和微秒上，需要处理进位
         let total_us = ft.us as f64 + smear * 1_000_000.0;
         let extra_sec = (total_us / 1_000_000.0) as i32;
-        ft.us = (total_us as i32) % 1_000_000;
+        ft.us = (total_us as i32).rem_euclid(1_000_000);
         ft.second += extra_sec;
-        // 处理秒/分/小时/日进位（简化：仅处理秒到分）
+
         while ft.second >= 60 {
             ft.second -= 60;
             ft.minute += 1;
-            // 类似处理分钟->小时->日，但为了简洁，先忽略
+            if ft.minute >= 60 {
+                ft.minute -= 60;
+                ft.hour += 1;
+                if ft.hour >= 24 {
+                    ft.hour -= 24;
+                }
+            }
         }
     }
+
     ft
 }
 
@@ -215,17 +297,14 @@ pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
         },
     );
 
-    // 应用闰秒平滑（与 api_GetLocalTime 保持一致）
     let smear = get_smear_offset();
     if smear.abs() > 1e-6 {
-        // 将 smear 偏移加到纳秒上
         let total_ns = ft.ns as f64 + smear * 1_000_000_000.0;
         let extra_sec = (total_ns / 1_000_000_000.0) as i32;
         let new_ns = (total_ns as i64).rem_euclid(1_000_000_000);
         ft.ns = new_ns as i32;
         ft.second += extra_sec;
 
-        // 处理秒进位到分钟
         while ft.second >= 60 {
             ft.second -= 60;
             ft.minute += 1;
@@ -234,7 +313,6 @@ pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
                 ft.hour += 1;
                 if ft.hour >= 24 {
                     ft.hour -= 24;
-                    // 闰秒最多一秒，不会跨日，这里暂时忽略日期进位
                 }
             }
         }
@@ -295,7 +373,7 @@ pub extern "C" fn api_GetFormattedTime() -> *const c_char {
 pub extern "C" fn api_GetFormattedTimeBuf(buf: *mut u8, buf_size: i32) -> i32 {
     if buf.is_null() {
         LAST_ERROR.store(TimeErrorCode::InvalidParam as i32, Ordering::Release);
-        return -1;  
+        return -1;
     }
     if buf_size <= 0 {
         LAST_ERROR.store(TimeErrorCode::BufferTooSmall as i32, Ordering::Release);
@@ -321,41 +399,6 @@ pub extern "C" fn api_GetFormattedTimeBuf(buf: *mut u8, buf_size: i32) -> i32 {
     bytes.len() as i32
 }
 
-#[repr(C)]
-pub enum LeapSecondMode {
-    Ignore = 0,
-    Smear = 1,
-    Reject = 2,
-}
-
-static LEAP_MODE: AtomicI32 = AtomicI32::new(0); // 0=ignore, 1=smear, 2=reject
-static LEAP_SMEAR_START: AtomicI64 = AtomicI64::new(0);
-static LEAP_SMEAR_DURATION: AtomicI64 = AtomicI64::new(86400); // 24 小时
-
-// 设置闰秒模式
-#[no_mangle]
-pub extern "C" fn api_SetLeapSecondMode(mode: i32) {
-    LEAP_MODE.store(mode, Ordering::Release);
-    if mode == 1 {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-        LEAP_SMEAR_START.store(now, Ordering::Release);
-    } else {
-        LEAP_SMEAR_START.store(0, Ordering::Release);
-    }
-}
-
-// 获取当前 smearing 偏移（秒）
-fn get_smear_offset() -> f64 {
-    let mode = LEAP_MODE.load(Ordering::Acquire);
-    if mode != 1 { return 0.0; }
-    let start = LEAP_SMEAR_START.load(Ordering::Acquire);
-    if start == 0 { return 0.0; }
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-    let elapsed = now - start;
-    let duration = LEAP_SMEAR_DURATION.load(Ordering::Acquire);
-    if elapsed >= duration { return 0.0; }
-    1.0 * (elapsed as f64) / (duration as f64)
-}
 // ============================================================================
 // 时区与 DST 设置
 // ============================================================================
@@ -457,7 +500,9 @@ pub extern "C" fn api_SetTimezoneByLocationEx(
 /// 获取基础时区偏移（不含 DST），失败返回 -1
 #[no_mangle]
 pub extern "C" fn api_GetBaseOffsetByLocation(lon: f64, lat: f64, code: *const c_char) -> i32 {
-    let country = if code.is_null() { None } else {
+    let country = if code.is_null() {
+        None
+    } else {
         unsafe { std::ffi::CStr::from_ptr(code).to_str().ok() }
     };
     match tz::offset_from_location(lon, lat, country) {
@@ -468,6 +513,7 @@ pub extern "C" fn api_GetBaseOffsetByLocation(lon: f64, lat: f64, code: *const c
         }
     }
 }
+
 // ============================================================================
 // DST 查询与控制
 // ============================================================================
@@ -747,7 +793,13 @@ pub extern "C" fn api_GetWeekdayNameZh(year: i32, month: i32, day: i32) -> *cons
 /// 安全版本：获取英文星期名称到调用者缓冲区
 /// 返回实际写入字节数（不含null），失败返回 -1
 #[no_mangle]
-pub extern "C" fn api_GetWeekdayNameBuf(year: i32, month: i32, day: i32, buf: *mut u8, buf_size: i32) -> i32 {
+pub extern "C" fn api_GetWeekdayNameBuf(
+    year: i32,
+    month: i32,
+    day: i32,
+    buf: *mut u8,
+    buf_size: i32,
+) -> i32 {
     if !is_valid_date(year, month, day) {
         LAST_ERROR.store(TimeErrorCode::InvalidDate as i32, Ordering::Release);
         return -1;
@@ -776,7 +828,13 @@ pub extern "C" fn api_GetWeekdayNameBuf(year: i32, month: i32, day: i32, buf: *m
 /// 安全版本：获取中文星期名称到调用者缓冲区
 /// 返回实际写入字节数（不含null），失败返回 -1
 #[no_mangle]
-pub extern "C" fn api_GetWeekdayNameZhBuf(year: i32, month: i32, day: i32, buf: *mut u8, buf_size: i32) -> i32 {
+pub extern "C" fn api_GetWeekdayNameZhBuf(
+    year: i32,
+    month: i32,
+    day: i32,
+    buf: *mut u8,
+    buf_size: i32,
+) -> i32 {
     if !is_valid_date(year, month, day) {
         LAST_ERROR.store(TimeErrorCode::InvalidDate as i32, Ordering::Release);
         return -1;
@@ -861,7 +919,11 @@ pub extern "C" fn api_DayOfYear(year: i32, month: i32, day: i32) -> i32 {
     let is_leap = api_IsLeapYear(year);
     let mut total = 0;
     for m in 1..month {
-        total += if m == 2 && is_leap { 29 } else { days_in_month[(m - 1) as usize] };
+        total += if m == 2 && is_leap {
+            29
+        } else {
+            days_in_month[(m - 1) as usize]
+        };
     }
     total + day
 }
@@ -870,36 +932,60 @@ pub extern "C" fn api_DayOfYear(year: i32, month: i32, day: i32) -> i32 {
 // 日志回调
 // ============================================================================
 
-// 日志等级
-#[repr(C)]
-pub enum LogLevel {
-    Debug = 0,
-    Info = 1,
-    Warning = 2,
-    Error = 3,
-}
-
-// 日志回调类型
-type LogCallback = extern "C" fn(level: i32, msg: *const c_char);
+/// 日志回调类型（增强版：包含文件、行号、时间戳）
+/// level: 0=Debug,1=Info,2=Warning,3=Error
+/// file: 源文件名（UTF-8）
+/// line: 行号
+/// timestamp: Unix 时间戳（秒）
+/// msg: 日志消息（UTF-8）
+type LogCallback = extern "C" fn(level: i32, file: *const c_char, line: u32, timestamp: u64, msg: *const c_char);
 
 static mut LOG_CALLBACK: Option<LogCallback> = None;
 static LOG_MUTEX: Mutex<()> = Mutex::new(());
+static LOG_LEVEL: AtomicI32 = AtomicI32::new(LogLevel::Info as i32);
 
+/// 注册日志回调函数（增强版）
 #[no_mangle]
 pub extern "C" fn api_SetLogCallback(callback: Option<LogCallback>) {
     let _lock = LOG_MUTEX.lock();
-    unsafe { LOG_CALLBACK = callback; }
+    unsafe {
+        LOG_CALLBACK = callback;
+    }
 }
 
-// 内部函数，在需要日志的地方调用
-fn log(level: LogLevel, msg: &str) {
+/// 设置日志最低输出级别（0=Debug,1=Info,2=Warning,3=Error）
+#[no_mangle]
+pub extern "C" fn api_SetLogLevel(level: i32) {
+    LOG_LEVEL.store(level, Ordering::Release);
+}
+
+/// 内部日志函数（供 DLL 内部使用），自动捕获文件、行号和时间戳
+#[allow(dead_code)]
+pub(crate) fn log(level: LogLevel, file: &'static str, line: u32, msg: &str) {
+    let current_level = LOG_LEVEL.load(Ordering::Acquire);
+    if (level as i32) < current_level {
+        return;
+    }
     let _lock = LOG_MUTEX.lock();
     unsafe {
         if let Some(cb) = LOG_CALLBACK {
+            let c_file = CString::new(file).unwrap_or_default();
             let c_msg = CString::new(msg).unwrap_or_default();
-            cb(level as i32, c_msg.as_ptr());
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            cb(level as i32, c_file.as_ptr(), line, timestamp, c_msg.as_ptr());
         }
     }
+}
+
+/// 宏简化调用，自动捕获文件名、行号
+#[macro_export]
+macro_rules! log_internal {
+    ($level:expr, $($arg:tt)*) => {
+        $crate::time_api::log($level, file!(), line!(), &format!($($arg)*))
+    };
 }
 
 // ============================================================================
