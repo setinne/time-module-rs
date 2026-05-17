@@ -21,9 +21,9 @@
 
 use std::ffi::CString;
 use std::os::raw::c_char;
-use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use std::panic::UnwindSafe;
+use std::sync::atomic::{AtomicI32, AtomicI64, AtomicUsize, Ordering};
 
 use crate::error::TimeErrorCode;
 use crate::time::{calc, config, tz, dst};
@@ -210,7 +210,7 @@ fn is_valid_date(year: i32, month: i32, day: i32) -> bool {
 
 pub const VERSION_MAJOR: i32 = 0;
 pub const VERSION_MINOR: i32 = 2;
-pub const VERSION_PATCH: i32 = 16;
+pub const VERSION_PATCH: i32 = 17;
 
 /// 获取 DLL 版本号（编码为 0xMMmmpp）
 #[no_mangle]
@@ -1244,5 +1244,67 @@ pub(crate) fn log(level: LogLevel, file: &'static str, line: u32, msg: &str) {
 /// 关闭 DLL，停止所有后台线程。卸载前调用以确保干净退出。
 #[no_mangle]
 pub extern "C" fn api_Shutdown() {
+    // 等待所有异步 NTP 任务完成（最多等待 5 秒）
+    for _ in 0..50 {
+        if ASYNC_TASK_COUNT.load(Ordering::SeqCst) == 0 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
     crate::time::core::ntp::shutdown();
+}
+
+// ============================================================================
+// 异步 NTP 同步（v0.2.17）
+// ============================================================================
+
+use std::thread;
+use std::time::Duration;
+
+/// 异步 NTP 同步回调类型
+/// success: 1=成功, 0=失败
+/// offset_ms: 同步后的时间偏移（毫秒），失败时为 0
+/// user_data: 用户自定义数据指针
+type NtpAsyncCallback = extern "C" fn(success: i32, offset_ms: i64, user_data: *mut std::ffi::c_void);
+
+static ASYNC_TASK_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// 启动异步 NTP 同步（非阻塞）
+/// 返回 0 表示成功启动异步任务，非 0 表示错误码
+/// 同步完成后调用 callback
+#[no_mangle]
+pub extern "C" fn api_ForceResyncAsync(
+    _handle: *mut TimeModuleHandle,
+    callback: Option<NtpAsyncCallback>,
+    user_data: *mut std::ffi::c_void,
+) -> i32 {
+    let cb = match callback {
+        Some(cb) => cb,
+        None => return TimeErrorCode::InvalidParam as i32,
+    };
+
+    // 将原始指针转换为 usize，以便安全地在线程间传递
+    let user_data_ptr = user_data as usize;
+
+    ASYNC_TASK_COUNT.fetch_add(1, Ordering::SeqCst);
+
+    thread::spawn(move || {
+        let success = crate::time::core::ntp::force_resync();
+        let offset_ms = if success {
+            if let Some((cached_sec, cached_us)) = crate::time::core::ntp::get_cached_utc_time() {
+                let system_sec = crate::time::core::local::get_system_time_ns().0;
+                (cached_sec as i64 - system_sec as i64) * 1000 + (cached_us as i64 / 1000)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        // 转换回 *mut c_void
+        let user_data = user_data_ptr as *mut std::ffi::c_void;
+        cb(success as i32, offset_ms, user_data);
+        ASYNC_TASK_COUNT.fetch_sub(1, Ordering::SeqCst);
+    });
+
+    TimeErrorCode::Success as i32
 }
