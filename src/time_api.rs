@@ -1,11 +1,5 @@
 // Copyright (c) 2026 Setinne
 // SPDX-License-Identifier: LGPL-2.1-only
-//
-// This file is part of the TIME_MODULE project.
-// Licensed under the GNU Lesser General Public License v2.1.
-// You may obtain a copy of the License at:
-//     https://www.gnu.org/licenses/lgpl-2.1.html
-
 
 //! 对外 C 接口
 //!
@@ -23,11 +17,12 @@
 //! 11. Unix 时间戳
 //! 12. 日期工具
 //! 13. 日志回调
+//! 14. Context 句柄模式（v0.2.16）
 
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, Once};
 use std::panic::UnwindSafe;
 
 use crate::error::TimeErrorCode;
@@ -66,10 +61,114 @@ pub enum LogLevel {
 }
 
 // ============================================================================
-// 全局状态
+// 全局状态（为保持向后兼容，保留原有静态变量，但新代码优先使用句柄）
 // ============================================================================
 
 static LAST_ERROR: AtomicI32 = AtomicI32::new(0);
+
+// 原有全局配置（在迁移到句柄模式期间仍使用，后续逐步废弃）
+static GLOBAL_TIMEZONE_OFFSET: AtomicI32 = AtomicI32::new(0);
+static GLOBAL_AUTO_DST_ENABLED: AtomicI32 = AtomicI32::new(1);
+static GLOBAL_AUTO_SYNC_ENABLED: AtomicI32 = AtomicI32::new(1);
+static GLOBAL_SYNC_INTERVAL: AtomicI64 = AtomicI64::new(3600);
+static LEAP_MODE: AtomicI32 = AtomicI32::new(LeapSecondMode::Ignore as i32);
+static LEAP_SMEAR_START: AtomicI64 = AtomicI64::new(0);
+static LEAP_SMEAR_DURATION: AtomicI64 = AtomicI64::new(86400);
+static LOG_LEVEL: AtomicI32 = AtomicI32::new(LogLevel::Info as i32);
+
+// 新版日志回调（增强版，包含文件/行号/时间戳）
+type LogCallback = extern "C" fn(level: i32, file: *const c_char, line: u32, timestamp: u64, msg: *const c_char);
+static mut LOG_CALLBACK: Option<LogCallback> = None;
+
+// ============================================================================
+// 句柄模式内部结构（v0.2.16）
+// ============================================================================
+
+/// 内部模块状态（所有原本全局的状态都移到这里）
+pub struct TimeModuleInner {
+    pub timezone_offset: i32,
+    pub auto_dst_enabled: bool,
+    pub auto_sync_enabled: bool,
+    pub sync_interval_secs: u64,
+    pub leap_mode: i32,
+    pub leap_smear_start: i64,
+    pub leap_smear_duration: i64,
+    pub log_callback: Option<LogCallback>,
+    pub log_level: i32,
+}
+
+impl Default for TimeModuleInner {
+    fn default() -> Self {
+        Self {
+            timezone_offset: 0,
+            auto_dst_enabled: true,
+            auto_sync_enabled: true,
+            sync_interval_secs: 3600,
+            leap_mode: LeapSecondMode::Ignore as i32,
+            leap_smear_start: 0,
+            leap_smear_duration: 86400,
+            log_callback: None,
+            log_level: LogLevel::Info as i32,
+        }
+    }
+}
+
+/// 对外句柄（不透明指针）
+#[repr(C)]
+pub struct TimeModuleHandle {
+    inner: Arc<Mutex<TimeModuleInner>>,
+}
+
+// 确保句柄可以在线程间安全传递
+unsafe impl Send for TimeModuleHandle {}
+unsafe impl Sync for TimeModuleHandle {}
+
+// 使用 Once + static mut 实现安全的延迟初始化
+static DEFAULT_MODULE_INIT: Once = Once::new();
+static mut DEFAULT_MODULE_PTR: *mut TimeModuleHandle = std::ptr::null_mut();
+
+fn get_default_handle() -> *mut TimeModuleHandle {
+    DEFAULT_MODULE_INIT.call_once(|| {
+        let handle = api_CreateModule();
+        // 从现有全局状态同步初始值
+        if let Some(h) = unsafe { handle.as_mut() } {
+            let mut inner = h.inner.lock().unwrap();
+            inner.timezone_offset = GLOBAL_TIMEZONE_OFFSET.load(Ordering::Acquire);
+            inner.auto_dst_enabled = GLOBAL_AUTO_DST_ENABLED.load(Ordering::Acquire) != 0;
+            inner.auto_sync_enabled = GLOBAL_AUTO_SYNC_ENABLED.load(Ordering::Acquire) != 0;
+            inner.sync_interval_secs = GLOBAL_SYNC_INTERVAL.load(Ordering::Acquire) as u64;
+            inner.leap_mode = LEAP_MODE.load(Ordering::Acquire);
+            inner.leap_smear_start = LEAP_SMEAR_START.load(Ordering::Acquire);
+            inner.leap_smear_duration = LEAP_SMEAR_DURATION.load(Ordering::Acquire);
+            inner.log_level = LOG_LEVEL.load(Ordering::Acquire);
+            unsafe {
+                inner.log_callback = LOG_CALLBACK;
+            }
+        }
+        unsafe {
+            DEFAULT_MODULE_PTR = handle;
+        }
+    });
+    unsafe { DEFAULT_MODULE_PTR }
+}
+
+/// 创建新模块实例
+#[no_mangle]
+pub extern "C" fn api_CreateModule() -> *mut TimeModuleHandle {
+    let inner = TimeModuleInner::default();
+    let handle = Box::new(TimeModuleHandle {
+        inner: Arc::new(Mutex::new(inner)),
+    });
+    Box::into_raw(handle)
+}
+
+/// 销毁模块实例
+#[no_mangle]
+pub extern "C" fn api_DestroyModule(handle: *mut TimeModuleHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)); }
+    }
+}
 
 // ============================================================================
 // 辅助函数
@@ -111,7 +210,7 @@ fn is_valid_date(year: i32, month: i32, day: i32) -> bool {
 
 pub const VERSION_MAJOR: i32 = 0;
 pub const VERSION_MINOR: i32 = 2;
-pub const VERSION_PATCH: i32 = 15;
+pub const VERSION_PATCH: i32 = 16;
 
 /// 获取 DLL 版本号（编码为 0xMMmmpp）
 #[no_mangle]
@@ -175,35 +274,66 @@ pub extern "C" fn api_GetCalendarType() -> i32 {
 }
 
 // ============================================================================
-// 闰秒控制
+// 闰秒控制（句柄版本 + 旧版兼容）
 // ============================================================================
 
-static LEAP_MODE: AtomicI32 = AtomicI32::new(LeapSecondMode::Ignore as i32);
-static LEAP_SMEAR_START: AtomicI64 = AtomicI64::new(0);
-static LEAP_SMEAR_DURATION: AtomicI64 = AtomicI64::new(86400); // 24 小时
 
-/// 设置闰秒处理模式
-#[no_mangle]
-pub extern "C" fn api_SetLeapSecondMode(mode: i32) {
-    LEAP_MODE.store(mode, Ordering::Release);
+fn set_leap_mode_on_handle(handle: *mut TimeModuleHandle, mode: i32) {
+    if handle.is_null() {
+        LEAP_MODE.store(mode, Ordering::Release);
+        if mode == LeapSecondMode::Smear as i32 {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            LEAP_SMEAR_START.store(now, Ordering::Release);
+        } else {
+            LEAP_SMEAR_START.store(0, Ordering::Release);
+        }
+        return;
+    }
+    let mut inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.leap_mode = mode;
     if mode == LeapSecondMode::Smear as i32 {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        LEAP_SMEAR_START.store(now, Ordering::Release);
+        inner.leap_smear_start = now;
     } else {
-        LEAP_SMEAR_START.store(0, Ordering::Release);
+        inner.leap_smear_start = 0;
     }
 }
 
+/// 设置闰秒处理模式（使用默认模块）
+#[no_mangle]
+pub extern "C" fn api_SetLeapSecondMode(mode: i32) {
+    set_leap_mode_on_handle(get_default_handle(), mode);
+}
+
+/// 设置闰秒处理模式（指定模块）
+#[no_mangle]
+pub extern "C" fn api_SetLeapSecondModeWithModule(handle: *mut TimeModuleHandle, mode: i32) {
+    set_leap_mode_on_handle(handle, mode);
+}
+
 /// 获取当前 smearing 偏移（秒）
-fn get_smear_offset() -> f64 {
-    let mode = LEAP_MODE.load(Ordering::Acquire);
+fn get_smear_offset(handle: *mut TimeModuleHandle) -> f64 {
+    let mode = if handle.is_null() {
+        LEAP_MODE.load(Ordering::Acquire)
+    } else {
+        let inner = unsafe { &*handle }.inner.lock().unwrap();
+        inner.leap_mode
+    };
     if mode != LeapSecondMode::Smear as i32 {
         return 0.0;
     }
-    let start = LEAP_SMEAR_START.load(Ordering::Acquire);
+    let start = if handle.is_null() {
+        LEAP_SMEAR_START.load(Ordering::Acquire)
+    } else {
+        let inner = unsafe { &*handle }.inner.lock().unwrap();
+        inner.leap_smear_start
+    };
     if start == 0 {
         return 0.0;
     }
@@ -212,7 +342,12 @@ fn get_smear_offset() -> f64 {
         .unwrap()
         .as_secs() as i64;
     let elapsed = now - start;
-    let duration = LEAP_SMEAR_DURATION.load(Ordering::Acquire);
+    let duration = if handle.is_null() {
+        LEAP_SMEAR_DURATION.load(Ordering::Acquire)
+    } else {
+        let inner = unsafe { &*handle }.inner.lock().unwrap();
+        inner.leap_smear_duration
+    };
     if elapsed >= duration {
         return 0.0;
     }
@@ -223,13 +358,25 @@ fn get_smear_offset() -> f64 {
 // 核心时间获取
 // ============================================================================
 
-/// 获取经校准的本地时间（微秒精度）
+/// 获取经校准的本地时间（微秒精度）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_GetLocalTime() -> FullTime {
+    api_GetLocalTimeWithModule(get_default_handle())
+}
+
+/// 获取经校准的本地时间（微秒精度）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_GetLocalTimeWithModule(handle: *mut TimeModuleHandle) -> FullTime {
     let mut ft = safe_catch(
         || {
             let (sec, us) = calc::get_calibrated_local_time();
-            calc::utc_to_fulltime(sec, us, config::get_timezone_offset())
+            let tz_offset = if handle.is_null() {
+                GLOBAL_TIMEZONE_OFFSET.load(Ordering::Acquire)
+            } else {
+                let inner = unsafe { &*handle }.inner.lock().unwrap();
+                inner.timezone_offset
+            };
+            calc::utc_to_fulltime(sec, us, tz_offset)
         },
         FullTime {
             year: 0,
@@ -243,7 +390,7 @@ pub extern "C" fn api_GetLocalTime() -> FullTime {
         },
     );
 
-    let smear = get_smear_offset();
+    let smear = get_smear_offset(handle);
     if smear.abs() > 1e-6 {
         let total_us = ft.us as f64 + smear * 1_000_000.0;
         let extra_sec = (total_us / 1_000_000.0) as i32;
@@ -266,13 +413,24 @@ pub extern "C" fn api_GetLocalTime() -> FullTime {
     ft
 }
 
-/// 获取经校准的本地时间（纳秒精度）
+/// 获取经校准的本地时间（纳秒精度）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
+    api_GetLocalTimeNsWithModule(get_default_handle())
+}
+
+/// 获取经校准的本地时间（纳秒精度）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_GetLocalTimeNsWithModule(handle: *mut TimeModuleHandle) -> FullTimeNs {
     let mut ft = safe_catch(
         || {
             let (secs, ns) = crate::time::core::local::get_system_time_ns();
-            let base_offset = config::get_timezone_offset();
+            let base_offset = if handle.is_null() {
+                GLOBAL_TIMEZONE_OFFSET.load(Ordering::Acquire)
+            } else {
+                let inner = unsafe { &*handle }.inner.lock().unwrap();
+                inner.timezone_offset
+            };
             let total_secs = secs + base_offset as i64;
 
             let ft = calc::utc_to_fulltime_ns(total_secs, ns);
@@ -297,7 +455,7 @@ pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
         },
     );
 
-    let smear = get_smear_offset();
+    let smear = get_smear_offset(handle);
     if smear.abs() > 1e-6 {
         let total_ns = ft.ns as f64 + smear * 1_000_000_000.0;
         let extra_sec = (total_ns / 1_000_000_000.0) as i32;
@@ -321,12 +479,26 @@ pub extern "C" fn api_GetLocalTimeNs() -> FullTimeNs {
     ft
 }
 
-/// 获取 NTP 网络时间（微秒精度，不可用时返回全 0）
+/// 获取 NTP 网络时间（微秒精度，不可用时返回全 0）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_GetNetworkTime() -> FullTime {
+    api_GetNetworkTimeWithModule(get_default_handle())
+}
+
+/// 获取 NTP 网络时间（微秒精度，不可用时返回全 0）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_GetNetworkTimeWithModule(handle: *mut TimeModuleHandle) -> FullTime {
     safe_catch(
         || match crate::time::core::ntp::get_cached_utc_time() {
-            Some((sec, us)) => calc::utc_to_fulltime(sec, us, config::get_timezone_offset()),
+            Some((sec, us)) => {
+                let tz_offset = if handle.is_null() {
+                    GLOBAL_TIMEZONE_OFFSET.load(Ordering::Acquire)
+                } else {
+                    let inner = unsafe { &*handle }.inner.lock().unwrap();
+                    inner.timezone_offset
+                };
+                calc::utc_to_fulltime(sec, us, tz_offset)
+            }
             None => FullTime {
                 year: 0,
                 month: 0,
@@ -351,20 +523,15 @@ pub extern "C" fn api_GetNetworkTime() -> FullTime {
     )
 }
 
-/// 获取格式化的时间字符串（动态分配，需调用 api_FreeString 释放）
+/// 获取格式化的时间字符串（动态分配，需调用 api_FreeString 释放）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_GetFormattedTime() -> *const c_char {
-    safe_catch(
-        || {
-            let ft = api_GetLocalTime();
-            let s = format!(
-                "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
-                ft.year, ft.month, ft.day, ft.hour, ft.minute, ft.second, ft.ms
-            );
-            CString::new(s).unwrap_or_default().into_raw()
-        },
-        CString::new("Error: Internal panic").unwrap_or_default().into_raw(),
-    )
+    let ft = api_GetLocalTime();
+    let s = format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
+        ft.year, ft.month, ft.day, ft.hour, ft.minute, ft.second, ft.ms
+    );
+    CString::new(s).unwrap_or_default().into_raw()
 }
 
 /// 安全版本的格式化时间（调用者提供缓冲区）
@@ -400,25 +567,56 @@ pub extern "C" fn api_GetFormattedTimeBuf(buf: *mut u8, buf_size: i32) -> i32 {
 }
 
 // ============================================================================
-// 时区与 DST 设置
+// 时区与 DST 设置（句柄版本 + 旧版兼容）
 // ============================================================================
 
-/// 获取当前时区偏移（秒）
+/// 获取当前时区偏移（秒）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_GetTimezoneOffset() -> i32 {
-    safe_catch(|| config::get_timezone_offset(), 0)
+    GLOBAL_TIMEZONE_OFFSET.load(Ordering::Acquire)
 }
 
-/// 设置时区偏移（秒）
+/// 获取当前时区偏移（秒）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_GetTimezoneOffsetWithModule(handle: *mut TimeModuleHandle) -> i32 {
+    if handle.is_null() {
+        return api_GetTimezoneOffset();
+    }
+    let inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.timezone_offset
+}
+
+/// 设置时区偏移（秒）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_SetTimezoneOffset(sec: i32) -> i32 {
-    let result = config::set_timezone_offset(sec).map_err(|_| TimeErrorCode::InvalidParam);
-    result_to_i32(result)
+    api_SetTimezoneOffsetWithModule(get_default_handle(), sec)
 }
 
-/// 通过名称设置时区（如 "UTC+8"）
+/// 设置时区偏移（秒）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_SetTimezoneOffsetWithModule(handle: *mut TimeModuleHandle, sec: i32) -> i32 {
+    if sec < -50400 || sec > 50400 {
+        LAST_ERROR.store(TimeErrorCode::InvalidParam as i32, Ordering::Release);
+        return TimeErrorCode::InvalidParam as i32;
+    }
+    if handle.is_null() {
+        GLOBAL_TIMEZONE_OFFSET.store(sec, Ordering::Release);
+        return TimeErrorCode::Success as i32;
+    }
+    let mut inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.timezone_offset = sec;
+    TimeErrorCode::Success as i32
+}
+
+/// 通过名称设置时区（如 "UTC+8"）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_SetTimezoneByName(name: *const c_char) -> i32 {
+    api_SetTimezoneByNameWithModule(get_default_handle(), name)
+}
+
+/// 通过名称设置时区（如 "UTC+8"）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_SetTimezoneByNameWithModule(handle: *mut TimeModuleHandle, name: *const c_char) -> i32 {
     let result = safe_catch(
         || {
             if name.is_null() {
@@ -430,22 +628,30 @@ pub extern "C" fn api_SetTimezoneByName(name: *const c_char) -> i32 {
                     .map_err(|_| TimeErrorCode::InvalidParam)?
             };
             let offset = tz::get_offset_by_name(name_str).ok_or(TimeErrorCode::InvalidParam)?;
-            config::set_timezone_offset(offset).map_err(|_| TimeErrorCode::InvalidParam)
+            api_SetTimezoneOffsetWithModule(handle, offset);
+            Ok(())
         },
         Err(TimeErrorCode::InternalPanic),
     );
     result_to_i32(result)
 }
 
-/// 通过经纬度设置时区（默认自动应用 DST）
+/// 通过经纬度设置时区（默认自动应用 DST）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_SetTimezoneByLocation(lon: f64, lat: f64, code: *const c_char) -> i32 {
     api_SetTimezoneByLocationEx(lon, lat, code, 1)
 }
 
-/// 通过经纬度设置时区，并指定是否应用 DST（apply_dst: 1=应用, 0=不应用）
+/// 通过经纬度设置时区，并指定是否应用 DST（apply_dst: 1=应用, 0=不应用）- 使用默认模块
 #[no_mangle]
-pub extern "C" fn api_SetTimezoneByLocationEx(
+pub extern "C" fn api_SetTimezoneByLocationEx(lon: f64, lat: f64, code: *const c_char, apply_dst: i32) -> i32 {
+    api_SetTimezoneByLocationExWithModule(get_default_handle(), lon, lat, code, apply_dst)
+}
+
+/// 通过经纬度设置时区，并指定是否应用 DST（指定模块）
+#[no_mangle]
+pub extern "C" fn api_SetTimezoneByLocationExWithModule(
+    handle: *mut TimeModuleHandle,
     lon: f64,
     lat: f64,
     code: *const c_char,
@@ -481,23 +687,16 @@ pub extern "C" fn api_SetTimezoneByLocationEx(
                 base_offset
             };
 
-            config::set_timezone_offset(final_offset).map_err(|_| TimeErrorCode::InvalidParam)
+            api_SetTimezoneOffsetWithModule(handle, final_offset);
+            Ok(())
         },
         Err(TimeErrorCode::InternalPanic),
     );
 
-    match result {
-        Ok(()) => TimeErrorCode::Success as i32,
-        Err(e) => {
-            if e == TimeErrorCode::InternalPanic {
-                LAST_ERROR.store(TimeErrorCode::InternalPanic as i32, Ordering::Release);
-            }
-            e as i32
-        }
-    }
+    result_to_i32(result)
 }
 
-/// 获取基础时区偏移（不含 DST），失败返回 -1
+/// 获取基础时区偏移（不含 DST），失败返回 -1 - 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_GetBaseOffsetByLocation(lon: f64, lat: f64, code: *const c_char) -> i32 {
     let country = if code.is_null() {
@@ -515,7 +714,7 @@ pub extern "C" fn api_GetBaseOffsetByLocation(lon: f64, lat: f64, code: *const c
 }
 
 // ============================================================================
-// DST 查询与控制
+// DST 查询与控制（句柄版本 + 旧版兼容）
 // ============================================================================
 
 /// 获取指定国家的 DST 偏移（秒）
@@ -536,10 +735,22 @@ pub extern "C" fn api_GetDSTOffset(country: *const c_char) -> i32 {
     )
 }
 
-/// 启用/禁用自动 DST
+/// 启用/禁用自动 DST - 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_SetAutoDST(enabled: bool) {
-    config::set_auto_dst_enabled(enabled);
+    api_SetAutoDSTWithModule(get_default_handle(), enabled);
+}
+
+/// 启用/禁用自动 DST - 指定模块
+#[no_mangle]
+pub extern "C" fn api_SetAutoDSTWithModule(handle: *mut TimeModuleHandle, enabled: bool) {
+    let val = if enabled { 1 } else { 0 };
+    if handle.is_null() {
+        GLOBAL_AUTO_DST_ENABLED.store(val, Ordering::Release);
+        return;
+    }
+    let mut inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.auto_dst_enabled = enabled;
 }
 
 /// 设置 DST 后端（0=规则表，1=系统 API）
@@ -655,7 +866,7 @@ pub extern "C" fn api_ForceResync() -> bool {
     crate::time::core::ntp::force_resync()
 }
 
-/// 强制同步 NTP（返回错误码）
+/// 强制同步 NTP（返回错误码）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_ForceResyncEx() -> i32 {
     if crate::time::core::ntp::force_resync() {
@@ -665,22 +876,61 @@ pub extern "C" fn api_ForceResyncEx() -> i32 {
     }
 }
 
-/// 启用/禁用自动 NTP 同步
+/// 启用/禁用自动 NTP 同步 - 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_SetAutoSyncEnabled(enabled: bool) {
+    api_SetAutoSyncEnabledWithModule(get_default_handle(), enabled);
+}
+
+/// 启用/禁用自动 NTP 同步 - 指定模块
+#[no_mangle]
+pub extern "C" fn api_SetAutoSyncEnabledWithModule(handle: *mut TimeModuleHandle, enabled: bool) {
+    let val = if enabled { 1 } else { 0 };
+    if handle.is_null() {
+        GLOBAL_AUTO_SYNC_ENABLED.store(val, Ordering::Release);
+        return;
+    }
+    let mut inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.auto_sync_enabled = enabled;
+    // 注意：实际启用/禁用后台线程需要全局控制，这里仅记录状态
     config::set_auto_sync_enabled(enabled);
 }
 
-/// 设置 NTP 自动同步间隔（秒），最小 10 秒，默认 3600
+/// 设置 NTP 自动同步间隔（秒），最小 10 秒，默认 3600 - 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_SetSyncInterval(seconds: u32) {
-    crate::time::defines::set_ntp_update_interval(seconds as u64);
+    api_SetSyncIntervalWithModule(get_default_handle(), seconds);
 }
 
-/// 获取当前 NTP 同步间隔（秒）
+/// 设置 NTP 自动同步间隔（秒），最小 10 秒，默认 3600 - 指定模块
+#[no_mangle]
+pub extern "C" fn api_SetSyncIntervalWithModule(handle: *mut TimeModuleHandle, seconds: u32) {
+    let secs = seconds.max(10) as u64;
+    if handle.is_null() {
+        GLOBAL_SYNC_INTERVAL.store(secs as i64, Ordering::Release);
+        crate::time::defines::set_ntp_update_interval(secs);
+        return;
+    }
+    let mut inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.sync_interval_secs = secs;
+    // 注意：实际同步间隔的修改需要通知后台线程，此处仅记录
+    crate::time::defines::set_ntp_update_interval(secs);
+}
+
+/// 获取当前 NTP 同步间隔（秒）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_GetSyncInterval() -> u32 {
     crate::time::defines::get_ntp_update_interval() as u32
+}
+
+/// 获取当前 NTP 同步间隔（秒）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_GetSyncIntervalWithModule(handle: *mut TimeModuleHandle) -> u32 {
+    if handle.is_null() {
+        return api_GetSyncInterval();
+    }
+    let inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.sync_interval_secs as u32
 }
 
 /// 获取 NTP 同步状态（0=未启动, 1=同步中, 2=已同步, 3=偏移过大）
@@ -929,63 +1179,62 @@ pub extern "C" fn api_DayOfYear(year: i32, month: i32, day: i32) -> i32 {
 }
 
 // ============================================================================
-// 日志回调
+// 日志回调（增强版，包含文件/行号/时间戳）
 // ============================================================================
 
-/// 日志回调类型（增强版：包含文件、行号、时间戳）
-/// level: 0=Debug,1=Info,2=Warning,3=Error
-/// file: 源文件名（UTF-8）
-/// line: 行号
-/// timestamp: Unix 时间戳（秒）
-/// msg: 日志消息（UTF-8）
-type LogCallback = extern "C" fn(level: i32, file: *const c_char, line: u32, timestamp: u64, msg: *const c_char);
-
-static mut LOG_CALLBACK: Option<LogCallback> = None;
-static LOG_MUTEX: Mutex<()> = Mutex::new(());
-static LOG_LEVEL: AtomicI32 = AtomicI32::new(LogLevel::Info as i32);
-
-/// 注册日志回调函数（增强版）
+/// 注册日志回调函数（增强版）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_SetLogCallback(callback: Option<LogCallback>) {
-    let _lock = LOG_MUTEX.lock();
-    unsafe {
-        LOG_CALLBACK = callback;
-    }
+    api_SetLogCallbackWithModule(get_default_handle(), callback);
 }
 
-/// 设置日志最低输出级别（0=Debug,1=Info,2=Warning,3=Error）
+/// 注册日志回调函数（增强版）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_SetLogCallbackWithModule(handle: *mut TimeModuleHandle, callback: Option<LogCallback>) {
+    if handle.is_null() {
+        unsafe { LOG_CALLBACK = callback; }
+        return;
+    }
+    let mut inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.log_callback = callback;
+}
+
+/// 设置日志最低输出级别（0=Debug,1=Info,2=Warning,3=Error）- 使用默认模块
 #[no_mangle]
 pub extern "C" fn api_SetLogLevel(level: i32) {
-    LOG_LEVEL.store(level, Ordering::Release);
+    api_SetLogLevelWithModule(get_default_handle(), level);
 }
 
-/// 内部日志函数（供 DLL 内部使用），自动捕获文件、行号和时间戳
+/// 设置日志最低输出级别（0=Debug,1=Info,2=Warning,3=Error）- 指定模块
+#[no_mangle]
+pub extern "C" fn api_SetLogLevelWithModule(handle: *mut TimeModuleHandle, level: i32) {
+    let level = level.clamp(0, 3);
+    if handle.is_null() {
+        LOG_LEVEL.store(level, Ordering::Release);
+        return;
+    }
+    let mut inner = unsafe { &*handle }.inner.lock().unwrap();
+    inner.log_level = level;
+}
+
+/// 内部日志函数（供 DLL 内部使用）
 #[allow(dead_code)]
 pub(crate) fn log(level: LogLevel, file: &'static str, line: u32, msg: &str) {
+    // 优先使用默认模块的回调
+    let callback = unsafe { LOG_CALLBACK };
     let current_level = LOG_LEVEL.load(Ordering::Acquire);
     if (level as i32) < current_level {
         return;
     }
-    let _lock = LOG_MUTEX.lock();
-    unsafe {
-        if let Some(cb) = LOG_CALLBACK {
-            let c_file = CString::new(file).unwrap_or_default();
-            let c_msg = CString::new(msg).unwrap_or_default();
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            cb(level as i32, c_file.as_ptr(), line, timestamp, c_msg.as_ptr());
-        }
+    if let Some(cb) = callback {
+        let c_file = CString::new(file).unwrap_or_default();
+        let c_msg = CString::new(msg).unwrap_or_default();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        cb(level as i32, c_file.as_ptr(), line, timestamp, c_msg.as_ptr());
     }
-}
-
-/// 宏简化调用，自动捕获文件名、行号
-#[macro_export]
-macro_rules! log_internal {
-    ($level:expr, $($arg:tt)*) => {
-        $crate::time_api::log($level, file!(), line!(), &format!($($arg)*))
-    };
 }
 
 // ============================================================================

@@ -1,6 +1,6 @@
 [package]
 name = "time_module"
-version = "0.2.15"
+version = "0.2.16"
 edition = "2021"
 license = "LGPL-2.1-only"
 authors = ["Setinne"]
@@ -9,7 +9,7 @@ description = "A high-precision NTP time & timezone library for Windows (Vista+)
 documentation = "https://github.com/setinne/time-module-rs"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 [profile.release]
 opt-level = "z"

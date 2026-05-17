@@ -92,3 +92,35 @@ mod tests {
         assert_eq!(wd_greg, wd_jul);
     }
 }
+
+/// 验证不同时区偏移得到的本地时间互不影响，
+/// 象征多实例场景下的状态隔离（底层计算函数应无副作用）
+#[test]
+fn test_timezone_offset_independence() {
+    use crate::time::calc::convert::utc_to_fulltime;
+
+    let utc_sec: u64 = 1700000000;
+    let utc_us: i32 = 0;
+
+    // 偏移 +8 小时（UTC+8）
+    let ft_plus8 = utc_to_fulltime(utc_sec, utc_us, 28800);
+    // 偏移 -5 小时（UTC-5）
+    let ft_minus5 = utc_to_fulltime(utc_sec, utc_us, -18000);
+
+    // 两者的小时、日期应当不同
+    assert_ne!(ft_plus8.hour, ft_minus5.hour);
+
+    // 检查 UTC+8 的时间是否比 UTC-5 的时间超前 13 小时（不考虑日期边界）
+    let plus8_total_seconds = ft_plus8.hour * 3600 + ft_plus8.minute * 60 + ft_plus8.second;
+    let minus5_total_seconds = ft_minus5.hour * 3600 + ft_minus5.minute * 60 + ft_minus5.second;
+    let diff = (plus8_total_seconds as i32 - minus5_total_seconds as i32).rem_euclid(86400);
+    // 差应为 13 小时（46800 秒）
+    assert_eq!(diff, 46800);
+
+    // 验证没有全局状态污染：连续调用同一偏移应得到相同结果
+    let ft_plus8_again = utc_to_fulltime(utc_sec, utc_us, 28800);
+    assert_eq!(ft_plus8.year, ft_plus8_again.year);
+    assert_eq!(ft_plus8.month, ft_plus8_again.month);
+    assert_eq!(ft_plus8.day, ft_plus8_again.day);
+    assert_eq!(ft_plus8.hour, ft_plus8_again.hour);
+}
