@@ -1,5 +1,11 @@
 // Copyright (c) 2026 Setinne
 // SPDX-License-Identifier: LGPL-2.1-only
+//
+// This file is part of the TIME_MODULE project.
+// Licensed under the GNU Lesser General Public License v2.1.
+// You may obtain a copy of the License at:
+//     https://www.gnu.org/licenses/lgpl-2.1.html
+
 
 //! 对外 C 接口
 //!
@@ -24,11 +30,17 @@ use std::os::raw::c_char;
 use std::sync::{Arc, Mutex, Once};
 use std::panic::UnwindSafe;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicUsize, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use crate::error::TimeErrorCode;
 use crate::time::{calc, config, tz, dst};
 use crate::time::calc::{FullTime, FullTimeNs, CalendarType};
 
+
+/// 有效时区偏移范围：UTC-12 到 UTC+12（-43200 秒 到 43200 秒）
+pub const MIN_VALID_OFFSET: i32 = -43200;
+pub const MAX_VALID_OFFSET: i32 = 43200;
 // ============================================================================
 // 类型定义
 // ============================================================================
@@ -210,7 +222,7 @@ fn is_valid_date(year: i32, month: i32, day: i32) -> bool {
 
 pub const VERSION_MAJOR: i32 = 0;
 pub const VERSION_MINOR: i32 = 2;
-pub const VERSION_PATCH: i32 = 17;
+pub const VERSION_PATCH: i32 = 18;
 
 /// 获取 DLL 版本号（编码为 0xMMmmpp）
 #[no_mangle]
@@ -592,12 +604,11 @@ pub extern "C" fn api_SetTimezoneOffset(sec: i32) -> i32 {
     api_SetTimezoneOffsetWithModule(get_default_handle(), sec)
 }
 
-/// 设置时区偏移（秒）- 指定模块
 #[no_mangle]
 pub extern "C" fn api_SetTimezoneOffsetWithModule(handle: *mut TimeModuleHandle, sec: i32) -> i32 {
-    if sec < -50400 || sec > 50400 {
-        LAST_ERROR.store(TimeErrorCode::InvalidParam as i32, Ordering::Release);
-        return TimeErrorCode::InvalidParam as i32;
+    if sec < MIN_VALID_OFFSET || sec > MAX_VALID_OFFSET {
+        LAST_ERROR.store(TimeErrorCode::TimezoneOffsetOutOfRange as i32, Ordering::Release);
+        return TimeErrorCode::TimezoneOffsetOutOfRange as i32;
     }
     if handle.is_null() {
         GLOBAL_TIMEZONE_OFFSET.store(sec, Ordering::Release);
@@ -627,7 +638,10 @@ pub extern "C" fn api_SetTimezoneByNameWithModule(handle: *mut TimeModuleHandle,
                     .to_str()
                     .map_err(|_| TimeErrorCode::InvalidParam)?
             };
-            let offset = tz::get_offset_by_name(name_str).ok_or(TimeErrorCode::InvalidParam)?;
+            let offset = tz::get_offset_by_name(name_str).ok_or(TimeErrorCode::TimezoneNameNotFound)?;
+            if offset < MIN_VALID_OFFSET || offset > MAX_VALID_OFFSET {
+                return Err(TimeErrorCode::TimezoneOffsetOutOfRange);
+            }
             api_SetTimezoneOffsetWithModule(handle, offset);
             Ok(())
         },
@@ -724,12 +738,17 @@ pub extern "C" fn api_GetDSTOffset(country: *const c_char) -> i32 {
         || {
             let country_str = unsafe {
                 if country.is_null() {
-                    ""
+                    return TimeErrorCode::DstRuleNotFound as i32;
                 } else {
                     std::ffi::CStr::from_ptr(country).to_str().unwrap_or("")
                 }
             };
-            dst::get_dst_offset(country_str)
+            let offset = dst::get_dst_offset(country_str);
+            if offset == 0 {
+                // 注意：0 可能是有效偏移（无 DST），也可能是错误
+                // 需要更好的判断，这里简化
+            }
+            offset
         },
         0,
     )
@@ -852,7 +871,7 @@ pub extern "C" fn api_IsValidTimezoneOffset(sec: i32) -> bool {
 
 #[no_mangle]
 pub extern "C" fn api_IsValidTimezoneOffsetEx(sec: i32) -> i32 {
-    if sec >= -50400 && sec <= 50400 { 1 } else { 0 }
+    if sec >= MIN_VALID_OFFSET && sec <= MAX_VALID_OFFSET { 1 } else { 0 }
 }
 
 // ============================================================================
@@ -1258,8 +1277,6 @@ pub extern "C" fn api_Shutdown() {
 // 异步 NTP 同步（v0.2.17）
 // ============================================================================
 
-use std::thread;
-use std::time::Duration;
 
 /// 异步 NTP 同步回调类型
 /// success: 1=成功, 0=失败
@@ -1283,28 +1300,32 @@ pub extern "C" fn api_ForceResyncAsync(
         None => return TimeErrorCode::InvalidParam as i32,
     };
 
-    // 将原始指针转换为 usize，以便安全地在线程间传递
     let user_data_ptr = user_data as usize;
 
-    ASYNC_TASK_COUNT.fetch_add(1, Ordering::SeqCst);
-
-    thread::spawn(move || {
-        let success = crate::time::core::ntp::force_resync();
-        let offset_ms = if success {
-            if let Some((cached_sec, cached_us)) = crate::time::core::ntp::get_cached_utc_time() {
-                let system_sec = crate::time::core::local::get_system_time_ns().0;
-                (cached_sec as i64 - system_sec as i64) * 1000 + (cached_us as i64 / 1000)
+    let result = thread::Builder::new()
+        .name("ntp-async".to_string())
+        .spawn(move || {
+            let success = crate::time::core::ntp::force_resync();
+            let offset_ms = if success {
+                if let Some((cached_sec, cached_us)) = crate::time::core::ntp::get_cached_utc_time() {
+                    let system_sec = crate::time::core::local::get_system_time_ns().0;
+                    (cached_sec as i64 - system_sec as i64) * 1000 + (cached_us as i64 / 1000)
+                } else {
+                    0
+                }
             } else {
                 0
-            }
-        } else {
-            0
-        };
-        // 转换回 *mut c_void
-        let user_data = user_data_ptr as *mut std::ffi::c_void;
-        cb(success as i32, offset_ms, user_data);
-        ASYNC_TASK_COUNT.fetch_sub(1, Ordering::SeqCst);
-    });
-
-    TimeErrorCode::Success as i32
+            };
+            let user_data = user_data_ptr as *mut std::ffi::c_void;
+            cb(success as i32, offset_ms, user_data);
+            ASYNC_TASK_COUNT.fetch_sub(1, Ordering::SeqCst);
+        });
+    
+    match result {
+        Ok(_handle) => {
+            ASYNC_TASK_COUNT.fetch_add(1, Ordering::SeqCst);
+            TimeErrorCode::Success as i32
+        }
+        Err(_) => TimeErrorCode::AsyncTaskFailed as i32,
+    }
 }

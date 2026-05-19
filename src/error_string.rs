@@ -9,34 +9,36 @@
 
 //! 错误码转字符串（动态分配，调用者必须用 api_FreeString 释放）
 
-use crate::error::TimeErrorCode;
 use std::ffi::CString;
 use std::os::raw::c_char;
 
-
-pub fn get_error_string(code: i32) -> *const c_char {
-    let err = match code {
-        0 => TimeErrorCode::Success,
-        1 => TimeErrorCode::InvalidParam,
-        2 => TimeErrorCode::NtpTimeout,
-        3 => TimeErrorCode::NoNtpServer,
-        4 => TimeErrorCode::Timeout,
-        5 => TimeErrorCode::NotSynced,
-        6 => TimeErrorCode::FileNotFound,
-        7 => TimeErrorCode::ParseError,
-        8 => TimeErrorCode::CountryNotFound,
-        9 => TimeErrorCode::DstNotAvailable,
-        10 => TimeErrorCode::InternalPanic,
-        12 => TimeErrorCode::NotInitialized,
-        13 => TimeErrorCode::InvalidDate,
-        14 => TimeErrorCode::BufferTooSmall,
-        15 => TimeErrorCode::NtpServerUnreachable,
-        16 => TimeErrorCode::NtpResponseInvalid,
-        17 => TimeErrorCode::LogCallbackNotSet,
-        _ => TimeErrorCode::UnknownError,
+/// 获取错误码描述字符串（动态分配，需调用 api_FreeString 释放）
+#[no_mangle]
+pub extern "C" fn get_error_string(code: i32) -> *mut c_char {
+    let s = match code {
+        0 => "Success",
+        1 => "Invalid parameter",
+        2 => "NTP timeout",
+        3 => "No NTP server available",
+        4 => "Operation timeout",
+        5 => "NTP not synced yet",
+        6 => "Resource file not found",
+        7 => "Parse error",
+        8 => "Country code not found",
+        9 => "DST rule not available",
+        10 => "Internal panic (recovered)",
+        11 => "Unknown error",
+        12 => "Component not initialized",
+        13 => "Invalid date",
+        14 => "Buffer too small",
+        15 => "NTP server unreachable",
+        16 => "Invalid NTP response",
+        17 => "Log callback not set",
+        18 => "Timezone offset out of range (-43200..43200)",
+        19 => "Timezone name not found",
+        20 => "DST rule not found for country",
+        21 => "Failed to start async task",
+        _ => "Unknown error code",
     };
-    // 统一使用动态分配，调用者必须释放
-    CString::new(err.as_str())
-        .unwrap_or_else(|_| CString::new("Unknown error").unwrap())
-        .into_raw()
+    CString::new(s).unwrap_or_default().into_raw()
 }

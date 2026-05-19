@@ -32,23 +32,6 @@ examples/
     └── test_time.js
 ```
 
-## 通用要求
-
-- 操作系统：Windows (DLL 目标平台)
-- 文件 `time_module.dll` 必须位于与可执行文件相同的目录或系统 PATH 中。
-- 所有示例均调用以下 API（顺序可能略有不同）：
-  - `api_GetVersion`
-  - `api_GetVersionString`
-  - `api_FreeString`
-  - `api_SetTimezoneOffset`
-  - `api_GetLocalTime`
-  - `api_GetFormattedTime`
-  - `api_GetFormattedTimeBuf`（安全缓冲区版本）
-  - `api_GetWeekday`
-  - `api_GetUnixTimestamp`
-  - `api_IsLeapYearEx`
-  - `api_Shutdown`
-
 ## 各语言示例说明
 
 ### 1. C 语言
@@ -164,6 +147,15 @@ libloading = "0.8"
 
 使用 `ffi-napi` 库调用 DLL 函数，`ref-napi` 处理结构体。
 
+## v0.2.18 更新内容
+
+所有示例已更新，包含：
+
+- **错误码检查**：`api_SetTimezoneOffset` 返回值检查
+- **错误字符串演示**：使用 `api_GetErrorString` 获取可读错误描述
+- **无效时区偏移测试**：演示错误码 18 (`TimezoneOffsetOutOfRange`)
+- **新增错误码展示**：显示错误码 18、19 的描述
+
 ## 常见问题
 
 **Q: 运行示例时提示“无法加载 time_module.dll”**  
@@ -175,12 +167,18 @@ A: 这些依赖均为常见库，安装说明已在对应小节中给出。
 **Q: 时区偏移量的单位是什么？**  
 A: 秒。示例中 `28800` 代表 UTC+8（8 × 3600 秒）。
 
+**Q: 有效时区偏移范围是多少？**  
+A: v0.2.18 起，有效范围为 -43200 到 43200 秒（UTC-12 到 UTC+12）。超出范围将返回错误码 18。
+
 **Q: `api_GetFormattedTimeBuf` 缓冲区需要多大？**  
 A: 建议至少 64 字节，示例中均分配了 64 字节。
 
 ## 更多信息
 
 - 主项目 README 请见项目根目录。
+- DLL 完整 API 文档请参考项目 README 中的 API 函数列表。
 - 遇到问题请提交 Issue 或联系维护者。
 
 ---
+
+> *最后更新：2026-05-19 (v0.2.18)*

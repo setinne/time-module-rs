@@ -124,3 +124,38 @@ fn test_timezone_offset_independence() {
     assert_eq!(ft_plus8.day, ft_plus8_again.day);
     assert_eq!(ft_plus8.hour, ft_plus8_again.hour);
 }
+// ============================================================================
+// v0.2.18 新增测试：错误码和时区偏移边界
+// ============================================================================
+
+#[cfg(test)]
+mod v0_2_18_tests {
+    use crate::MIN_VALID_OFFSET;
+    use crate::MAX_VALID_OFFSET;
+    use crate::error::TimeErrorCode;
+
+    #[test]
+    fn test_timezone_offset_range() {
+        // 测试有效范围内的偏移
+        let valid_offsets = vec![-43200, -28800, 0, 28800, 43200];
+        for &offset in &valid_offsets {
+            // 验证偏移在范围内
+            assert!(offset >= MIN_VALID_OFFSET && offset <= MAX_VALID_OFFSET);
+        }
+
+        // 测试超出范围的偏移
+        let invalid_offsets = vec![-50400, -50000, 50000, 50400];
+        for &offset in &invalid_offsets {
+            assert!(offset < MIN_VALID_OFFSET || offset > MAX_VALID_OFFSET);
+        }
+    }
+
+    #[test]
+    fn test_error_code_values() {
+        // 验证新增错误码的值
+        assert_eq!(TimeErrorCode::TimezoneOffsetOutOfRange as i32, 18);
+        assert_eq!(TimeErrorCode::TimezoneNameNotFound as i32, 19);
+        assert_eq!(TimeErrorCode::DstRuleNotFound as i32, 20);
+        assert_eq!(TimeErrorCode::AsyncTaskFailed as i32, 21);
+    }
+}

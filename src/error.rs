@@ -28,9 +28,13 @@ pub enum TimeErrorCode {
     BufferTooSmall = 14,
     NtpServerUnreachable = 15,
     NtpResponseInvalid = 16,
-    LogCallbackNotSet = 17,
+    LogCallbackNotSet = 17, 
+    // v0.2.18 新增
+    TimezoneOffsetOutOfRange = 18,   // 时区偏移超出有效范围
+    TimezoneNameNotFound = 19,       // 时区名称不存在
+    DstRuleNotFound = 20,            // DST规则未找到
+    AsyncTaskFailed = 21,            // 异步任务启动失败
 }
-
 impl TimeErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -52,6 +56,11 @@ impl TimeErrorCode {
             TimeErrorCode::NtpServerUnreachable => "NTP server unreachable",
             TimeErrorCode::NtpResponseInvalid => "Invalid NTP response",
             TimeErrorCode::LogCallbackNotSet => "Log callback not set",
+            // v0.2.18 新增
+            TimeErrorCode::TimezoneOffsetOutOfRange => "Timezone offset out of range (-43200..43200)",
+            TimeErrorCode::TimezoneNameNotFound => "Timezone name not found",
+            TimeErrorCode::DstRuleNotFound => "DST rule not found for country",
+            TimeErrorCode::AsyncTaskFailed => "Failed to start async task",
         }
     }
 }
