@@ -183,7 +183,7 @@ gcc myapp.c -L. -ltime_module_x64 -o myapp.exe
 | 函数名 | 返回值 | 说明 |
 |--------|--------|------|
 | `api_GetTimezoneOffset()` | `int` | 获取当前时区偏移（秒） |
-| `api_SetTimezoneOffset()` | `int` | 设置时区偏移（秒），有效范围：-43200 到 43200（UTC-12 到 UTC+12） |
+| `api_SetTimezoneOffset()` | `int` | 设置时区偏移（秒），有效范围：-43200 到 50400（**UTC-12 到 UTC+14**） |
 | `api_SetTimezoneByName()` | `int` | 通过名称设置时区（如 "UTC+8"） |
 | `api_SetTimezoneByLocation()` | `int` | 通过经纬度设置时区（默认自动应用 DST） |
 | `api_SetTimezoneByLocationEx()` | `int` | **推荐** 通过经纬度设置时区，显式指定是否应用 DST |
@@ -255,7 +255,7 @@ gcc myapp.c -L. -ltime_module_x64 -o myapp.exe
 
 | 函数名 | 返回值 | 说明 |
 |--------|--------|------|
-| `api_GetVersion()` | `int` | 获取 DLL 版本号（如 0x000212 表示 v0.2.18） |
+| `api_GetVersion()` | `int` | 获取 DLL 版本号（如 0x000213 表示 v0.2.19） |
 | `api_GetVersionString()` | `const char*` | 获取版本号字符串（**必须**调用 `api_FreeString` 释放） |
 | `api_GetErrorString()` | `const char*` | 获取错误码描述文字（**必须**调用 `api_FreeString` 释放） |
 | `api_GetLastError()` | `int` | 获取最后发生的错误码 |
@@ -318,7 +318,7 @@ typedef struct {
 | 15 | `NtpServerUnreachable` | NTP 服务器不可达 |
 | 16 | `NtpResponseInvalid` | NTP 响应无效 |
 | 17 | `LogCallbackNotSet` | 日志回调未设置 |
-| **18** | `TimezoneOffsetOutOfRange` | **v0.2.18** 时区偏移超出有效范围（-43200..43200） |
+| **18** | `TimezoneOffsetOutOfRange` | **v0.2.18** 时区偏移超出有效范围（-43200..50400，UTC-12 到 UTC+14） |
 | **19** | `TimezoneNameNotFound` | **v0.2.18** 时区名称不存在 |
 | **20** | `DstRuleNotFound` | **v0.2.18** DST 规则未找到 |
 | **21** | `AsyncTaskFailed` | **v0.2.18** 异步任务启动失败 |
@@ -380,7 +380,7 @@ CN,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
 - **内存释放**：所有返回 `const char*` 的 API 必须调用 `api_FreeString` 释放。推荐使用缓冲区版本（如 `api_GetFormattedTimeBuf`）避免手动内存管理。
 - **跨语言 `bool`**：强烈建议使用返回 `int` 的 `Ex` 系列函数，避免 C ABI 中 `bool` 类型在不同语言的映射差异。
-- **时区偏移范围**：有效范围为 -43200 到 43200 秒（UTC-12 到 UTC+12）。超出此范围 `api_SetTimezoneOffset` 将返回错误码 18（`TimezoneOffsetOutOfRange`）。
+- **时区偏移范围**：有效范围为 -43200 到 50400 秒（**UTC-12 到 UTC+14**）。支持所有标准时区，包括基里巴斯（UTC+14）、托克劳（UTC+13）等政治选择时区。
 - **DST 显式控制**：`api_SetTimezoneByLocation` 会自动叠加 DST。如需精确控制，使用 `api_SetTimezoneByLocationEx` 或先用 `api_GetBaseOffsetByLocation` 获取基础偏移。
 - **NTP 零值检查**：`api_GetNetworkTime()` 返回全 0 表示 NTP 时间不可用，请先检查 `api_GetNTPStatus()` 或 `api_IsNetworkTimeAvailableEx()`。
 - **必须调用 `api_Shutdown()`**：在卸载 DLL 前**必须**调用此函数以通知后台线程和异步任务退出，否则可能导致进程崩溃。
@@ -398,14 +398,14 @@ CN,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
 ## 📥 下载
 
-### 最新版本：v0.2.18
+### 最新版本：v0.2.19
 
 | 文件 | 架构 | 大小（约） |
 |------|------|------------|
 | [time_module_normal_x64.dll](https://github.com/setinne/time-module-rs/releases/latest) | 64位 | 1,088 KB |
 | [time_module_normal_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 | 1,091 KB |
 | [time_module_upx_x64.dll](https://github.com/setinne/time-module-rs/releases/latest) | 64位 (UPX) | 382 KB |
-| [time_module_upx_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 (UPX) | 413 KB |
+| [time_module_upx_x86.dll](https://github.com/setinne/time-module-rs/releases/latest) | 32位 (UPX) | 412 KB |
 | [libtime_module_x64.a](https://github.com/setinne/time-module-rs/releases/latest) | 64位静态库 (MinGW) | 15.9 MB |
 | [libtime_module_x86.a](https://github.com/setinne/time-module-rs/releases/latest) | 32位静态库 (MinGW) | 15.9 MB |
 | [time_module_x64.lib](https://github.com/setinne/time-module-rs/releases/latest) | 64位导入库 (MSVC) | 2.4 KB |
@@ -420,3 +420,4 @@ CN,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 LGPL-2.1-only - 详见 [LICENSE](LICENSE) 文件
 
 ---
+

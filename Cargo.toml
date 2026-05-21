@@ -1,6 +1,6 @@
 [package]
 name = "time_module"
-version = "0.2.18"
+version = "0.2.19"
 edition = "2021"
 license = "LGPL-2.1-only"
 authors = ["Setinne"]

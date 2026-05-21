@@ -34,7 +34,7 @@ pub extern "C" fn get_error_string(code: i32) -> *mut c_char {
         15 => "NTP server unreachable",
         16 => "Invalid NTP response",
         17 => "Log callback not set",
-        18 => "Timezone offset out of range (-43200..43200)",
+        18 => "Timezone offset out of range (-43200..50400, UTC-12 to UTC+14)",
         19 => "Timezone name not found",
         20 => "DST rule not found for country",
         21 => "Failed to start async task",
