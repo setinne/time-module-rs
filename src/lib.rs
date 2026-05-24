@@ -32,14 +32,18 @@
 
 // 时间模块入口，对外暴露唯一 C 接口
 
+#![allow(dead_code)]
 #![warn(deprecated)]
 
-pub mod error;
-pub mod error_string;
-pub mod resources;
-pub mod time;
-pub mod time_api;
+mod error;
+mod error_string;
+mod time;
+mod resources;
 
+// time_api 模块（已拆分为文件夹）
+mod time_api;
+
+// 重新导出公共 API
 pub use time_api::*;
 
 // 保存 DLL 句柄

@@ -8,6 +8,7 @@
 
 
 //! 获取系统 UTC 时间及单调时钟
+#![allow(dead_code)]
 
 use std::sync::Once;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};

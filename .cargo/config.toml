@@ -1,29 +1,15 @@
-# .cargo/config.toml
-
 [source.crates-io]
 replace-with = "ustc"
-
-[source.tuna]
-registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
 
 [source.ustc]
 registry = "https://mirrors.ustc.edu.cn/crates.io-index"
 
-[source.rustcc]
-registry = "https://code.aliyun.com/rustcc/crates.io-index.git"
-
 [build]
-# 默认目标（可选，注释掉以便自动检测）
-# target = "x86_64-pc-windows-msvc"
-
-[target.x86_64-pc-windows-msvc]
-# 64位 Vista 兼容
-rustflags = ["-C", "target-feature=+crt-static"]
-
-[target.i686-pc-windows-msvc]
-# 32位 Vista 兼容
-rustflags = ["-C", "target-feature=+crt-static"]
+target = "x86_64-pc-windows-gnu"
 
 [target.x86_64-pc-windows-gnu]
-# 如果使用 GNU 工具链
-rustflags = ["-C", "target-feature=+crt-static"]
+linker = "x86_64-w64-mingw32-gcc"
+rustflags = [
+    "-C", "link-args=-L C:/TDM-GCC-64/lib/gcc/x86_64-w64-mingw32/10.3.0 -l:libgcc.a",
+    "-C", "target-feature=+crt-static",
+]

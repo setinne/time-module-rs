@@ -6,8 +6,9 @@
 // You may obtain a copy of the License at:
 //     https://www.gnu.org/licenses/lgpl-2.1.html
 
+//! 错误码定义
 
-// 错误码定义
+/// 错误码定义
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimeErrorCode {
@@ -28,14 +29,16 @@ pub enum TimeErrorCode {
     BufferTooSmall = 14,
     NtpServerUnreachable = 15,
     NtpResponseInvalid = 16,
-    LogCallbackNotSet = 17, 
+    LogCallbackNotSet = 17,
     // v0.2.18 新增
-    TimezoneOffsetOutOfRange = 18,   // 时区偏移超出有效范围
-    TimezoneNameNotFound = 19,       // 时区名称不存在
-    DstRuleNotFound = 20,            // DST规则未找到
-    AsyncTaskFailed = 21,            // 异步任务启动失败
+    TimezoneOffsetOutOfRange = 18,
+    TimezoneNameNotFound = 19,
+    DstRuleNotFound = 20,
+    AsyncTaskFailed = 21,
 }
+
 impl TimeErrorCode {
+    /// 获取错误码描述
     pub fn as_str(&self) -> &'static str {
         match self {
             TimeErrorCode::Success => "Success",
@@ -46,8 +49,8 @@ impl TimeErrorCode {
             TimeErrorCode::NotSynced => "NTP not synced yet",
             TimeErrorCode::FileNotFound => "Resource file not found",
             TimeErrorCode::ParseError => "Parse error",
-            TimeErrorCode::CountryNotFound => "Country code not found in timezone database",
-            TimeErrorCode::DstNotAvailable => "DST not available (no rule or disabled)",
+            TimeErrorCode::CountryNotFound => "Country code not found",
+            TimeErrorCode::DstNotAvailable => "DST rule not available",
             TimeErrorCode::InternalPanic => "Internal panic occurred",
             TimeErrorCode::UnknownError => "Unknown error",
             TimeErrorCode::NotInitialized => "Component not initialized",
@@ -56,10 +59,9 @@ impl TimeErrorCode {
             TimeErrorCode::NtpServerUnreachable => "NTP server unreachable",
             TimeErrorCode::NtpResponseInvalid => "Invalid NTP response",
             TimeErrorCode::LogCallbackNotSet => "Log callback not set",
-            // v0.2.18 新增
-            TimeErrorCode::TimezoneOffsetOutOfRange => "Timezone offset out of range (-43200..43200)",
+            TimeErrorCode::TimezoneOffsetOutOfRange => "Timezone offset out of range (-43200..50400)",
             TimeErrorCode::TimezoneNameNotFound => "Timezone name not found",
-            TimeErrorCode::DstRuleNotFound => "DST rule not found for country",
+            TimeErrorCode::DstRuleNotFound => "DST rule not found",
             TimeErrorCode::AsyncTaskFailed => "Failed to start async task",
         }
     }
