@@ -37,4 +37,4 @@ pub const OFFSET_UTC_PLUS_14:  i32 = 50400;  // 基里巴斯莱恩群岛
 /// 版本号常量
 pub const VERSION_MAJOR: i32 = 0;
 pub const VERSION_MINOR: i32 = 2;
-pub const VERSION_PATCH: i32 = 19;
+pub const VERSION_PATCH: i32 = 20;
